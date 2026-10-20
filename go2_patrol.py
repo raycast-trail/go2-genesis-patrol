@@ -85,24 +85,177 @@ class WaypointFollower:
         return vx, 0.0, yaw_rate
 
 
+def run_patrol(exp_name, ckpt, seed=-1, avoid=True, waypoints="square", laps=1.0, max_time=60.0, out=None,
+               camera=None, res=(1280, 720), fps=50, collision_dist=0.25, lidar_warmup=5, avoid_kwargs=None,
+               lidar_min_range=0.0, verbose=True):
+    """1 エピソードの巡回を実行して計測値の dict を返す(gs.init() 済みであること)。
+
+    out=None なら録画しない(camera_cfg=None、T04 の評価用)。
+    戻り値: reached, max_laps_idx, end_reason, sim_s, wall_s, n_steps, n_collision, first_collision_t, n_contact,
+            first_contact_t, n_raw_hit_steps, n_raw_hits, n_hits_after, path_length, min_lidar, n_placed, scene_meta,
+            log(np.ndarray, 列は LOG_HEADER)
+    """
+    log_dir = f"logs/{exp_name}"
+    with open(f"{log_dir}/cfgs.pkl", "rb") as f:
+        env_cfg, obs_cfg, reward_cfg, command_cfg, train_cfg = pickle.load(f)
+    reward_cfg["reward_scales"] = {}
+    # go2_env.py は episode_length_s(学習用 20 s)を超えるとタイムアウトでリセットする。
+    # 巡回中にリセットされないよう、上限を max_time より長く上書きする(T01 申し送り)
+    env_cfg["episode_length_s"] = max_time + 5.0
+    if verbose:
+        print(f"[go2_patrol] trained command ranges: vx={command_cfg['lin_vel_x_range']} "
+              f"vy={command_cfg['lin_vel_y_range']} yaw={command_cfg['ang_vel_range']}")
+
+    wps = WAYPOINT_SETS[waypoints]
+    obstacles, scene_meta = make_obstacles(seed, return_spec=True)
+    if seed >= 0:
+        scene_file = save_scene(scene_meta)
+        if verbose:
+            print(f"[go2_patrol] scene seed={seed}: {scene_meta['n_placed']} obstacles -> {scene_file}")
+    camera_mode = camera or ("overhead" if seed >= 0 else "follow")
+    if out is None:
+        camera_cfg = None
+    elif camera_mode == "overhead":
+        camera_cfg = dict(res=tuple(res), pos=(1.0, -4.0, 4.0), lookat=(1.0, 1.0, 0.0), fov=50, GUI=False)
+    else:
+        camera_cfg = dict(res=tuple(res), pos=(4.0, -4.0, 3.0), lookat=(1.0, 1.0, 0.3), fov=45, GUI=False)
+    lidar_cfg = make_lidar_cfg(min_range=lidar_min_range)
+
+    env = Go2Env(num_envs=1, env_cfg=env_cfg, obs_cfg=obs_cfg, reward_cfg=reward_cfg,
+                 command_cfg=command_cfg, show_viewer=False, camera_cfg=camera_cfg,
+                 lidar_cfg=lidar_cfg, obstacles=obstacles)
+    max_range = lidar_cfg["max_range"]
+    cam = env.cam
+
+    runner = OnPolicyRunner(env, train_cfg, log_dir, device=gs.device)
+    runner.load(os.path.join(log_dir, f"model_{ckpt}.pt"))
+    policy = runner.get_inference_policy(device=gs.device)
+
+    env._resample_commands = lambda envs_idx: None   # 指令は追従則で与える
+    follower = WaypointFollower(wps, loop=waypoints != "line")
+    max_laps_idx = int(len(wps) * laps)
+    avoider = ObstacleAvoider(**(avoid_kwargs or {})) if avoid else None
+    if verbose:
+        print(f"[go2_patrol] avoid={'on ' + str(avoider.params()) if avoider else 'off'}")
+
+    obs_dict = env.reset()
+    if cam is not None:
+        cam.start_recording(save_to_filename=out, fps=fps)
+    t0 = time.time()
+    n_steps, reached, log = 0, 0, []
+    end_reason = "timeout"   # max_time まで走り切った場合。完了 / 転倒で上書きする
+    scan = None
+    n_collision, first_collision_t = 0, None
+    n_contact, first_contact_t = 0, None          # 物理接触(robot と障害物の contact)。衝突の主指標(T04)
+    n_raw_hit_steps, n_raw_hits, n_hits_after = 0, 0, 0   # 地面除去の検証用(raw / 除去後のヒット数)
+    min_lidar = max_range
+    with torch.no_grad():
+        while n_steps * env.dt < max_time:
+            # env.base_pos / base_euler は step() 内で更新されるため reset 直後は未定義 → ロボットから直接読む
+            pos = env.robot.get_pos()[0].cpu().numpy()
+            yaw = float(quat_to_xyz(env.robot.get_quat(), rpy=True, degrees=False)[0, 2])
+            prev_idx = follower.idx
+            vx, vy, wz = follower(pos[:2], yaw)
+            if follower.idx != prev_idx:
+                reached += 1
+                if verbose:
+                    print(f"[go2_patrol] t={n_steps * env.dt:5.1f}s reached waypoint {prev_idx} at ({pos[0]:.2f}, {pos[1]:.2f})")
+                if reached >= max_laps_idx and waypoints != "line":
+                    end_reason = "completed"
+                    break
+            if follower.done:
+                end_reason = "completed"
+                break
+            vx_follow, wz_follow = vx, wz
+            if avoider is not None and scan is not None:
+                vx, wz = avoider(scan, vx, wz)
+            av = avoider.last if avoider is not None else {}
+            env.commands[:] = torch.tensor([vx, vy, wz], dtype=gs.tc_float, device=gs.device)
+            actions = policy(obs_dict)
+            obs_dict, rews, dones, infos = env.step(actions)
+            if cam is not None and camera_mode == "follow":
+                cam.set_pose(pos=(pos[0] + 3.0, pos[1] - 3.0, 2.2), lookat=(pos[0], pos[1], 0.3))
+            # LiDAR(着地後から使う)。ニアミス = 地面除去後の最小距離 < collision_dist
+            min_dist, collision, raw_hits, hits = max_range, 0, 0, 0
+            if n_steps >= lidar_warmup:
+                scan, raw = read_scan(env, return_raw=True)
+                min_dist = float(scan.min())
+                min_lidar = min(min_lidar, min_dist)
+                raw_hits, hits = int(np.sum(raw < max_range)), int(np.sum(scan < max_range))
+                n_raw_hit_steps += raw_hits > 0
+                n_raw_hits += raw_hits
+                n_hits_after += hits
+                if min_dist < collision_dist:
+                    collision = 1
+                    n_collision += 1
+                    if first_collision_t is None:
+                        first_collision_t = n_steps * env.dt
+                        if verbose:
+                            print(f"[go2_patrol] collision (lidar) at t={first_collision_t:.1f}s min_dist={min_dist:.2f}")
+            contact = 0
+            for obs in env.obstacles:
+                c = env.robot.get_contacts(with_entity=obs)
+                n_c = int(c["valid_mask"].sum()) if "valid_mask" in c else len(c["position"])
+                if n_c > 0:
+                    contact = 1
+                    break
+            if contact:
+                n_contact += 1
+                if first_contact_t is None:
+                    first_contact_t = n_steps * env.dt
+                    if verbose:
+                        print(f"[go2_patrol] contact with obstacle at t={first_contact_t:.1f}s (lidar min_dist={min_dist:.2f})")
+            log.append((n_steps * env.dt, pos[0], pos[1], math.degrees(yaw), vx, wz, min_dist, collision, raw_hits, hits,
+                        contact, vx_follow, wz_follow, av.get("d_front", np.inf), av.get("hit_lat", 0.0),
+                        avoider.side if avoider is not None else 0))
+            n_steps += 1
+            if bool(dones[0]):
+                # 環境のエピソード上限によるリセット(time_outs)と転倒(pitch/roll 超過)を区別する
+                if bool(infos["time_outs"][0]):
+                    end_reason = "timeout"
+                    if verbose:
+                        print(f"[go2_patrol] timeout (env episode limit) at t={n_steps * env.dt:.1f}s")
+                else:
+                    end_reason = "fell"
+                    if verbose:
+                        print(f"[go2_patrol] fell at t={n_steps * env.dt:.1f}s (cmd vx={vx:.2f}, yaw_rate={wz:.2f})")
+                break
+    if cam is not None:
+        cam.stop_recording()
+    elapsed = time.time() - t0
+    log = np.array(log)
+    path_length = float(np.sum(np.hypot(np.diff(log[:, 1]), np.diff(log[:, 2])))) if len(log) > 1 else 0.0
+    return dict(reached=reached, max_laps_idx=max_laps_idx, end_reason=end_reason, sim_s=n_steps * env.dt,
+                wall_s=elapsed, n_steps=n_steps, n_collision=n_collision, first_collision_t=first_collision_t,
+                n_contact=n_contact, first_contact_t=first_contact_t, n_raw_hit_steps=n_raw_hit_steps,
+                n_raw_hits=n_raw_hits, n_hits_after=n_hits_after, path_length=path_length, min_lidar=min_lidar,
+                n_placed=scene_meta["n_placed"], scene_meta=scene_meta, log=log, lidar_steps=max(n_steps - lidar_warmup, 0),
+                avoid_params=avoider.params() if avoider else None)
+
+
+LOG_HEADER = "t,x,y,yaw_deg,cmd_vx,cmd_yaw,min_dist,collision,raw_hits,hits,contact,follow_vx,follow_yaw,d_front,hit_lat,avoid_side"
+SUMMARY_HEADER = ("exp_name,ckpt,backend,waypoints,seed,n_obstacles,avoid,reached,n_waypoints,end_reason,sim_s,"
+                  "wall_s,collision_steps,first_collision_s,contact_steps,first_contact_s,raw_hit_steps,raw_hits,hits_after,out")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-e", "--exp-name", type=str, default="go2-patrol")
     parser.add_argument("--ckpt", type=int, default=299)
     parser.add_argument("--out", type=str, default="go2_patrol.mp4")
+    parser.add_argument("--no-video", action="store_true", help="録画しない(camera なし。評価用、速い)")
     parser.add_argument("--backend", choices=["gpu", "cpu"], default="gpu")
     parser.add_argument("--waypoints", choices=list(WAYPOINT_SETS), default="square")
     parser.add_argument("--laps", type=float, default=1.0, help="周回数(square/circle)。line では無視")
     parser.add_argument("--max-time", type=float, default=60.0, help="シミュレーション秒数の上限")
     parser.add_argument("--res", type=int, nargs=2, default=[1280, 720])
     parser.add_argument("--fps", type=int, default=50)
-    parser.add_argument("--markers", action="store_true", help="ウェイポイントに目印(衝突なしの円柱)を置く")
     parser.add_argument("--seed", type=int, default=-1, help="障害物シーンの seed(eval/scenes.py)。-1 で障害物なし")
     parser.add_argument("--avoid", action=argparse.BooleanOptionalAction, default=True,
-                        help="LiDAR セクタ距離による回避則(nav/avoid.py)を使う。--no-avoid で経路追従のみ")
+                        help="LiDAR による回避則(nav/avoid.py)を使う。--no-avoid で経路追従のみ")
     parser.add_argument("--camera", choices=["follow", "overhead"], default=None,
                         help="追従カメラ / 俯瞰カメラ(既定: 障害物ありなら overhead、なしなら follow)")
-    parser.add_argument("--collision-dist", type=float, default=0.25, help="LiDAR 最小距離がこれ未満なら衝突")
+    parser.add_argument("--collision-dist", type=float, default=0.25, help="LiDAR 最小距離がこれ未満ならニアミス(LiDAR 衝突)")
     parser.add_argument("--lidar-warmup", type=int, default=5, help="着地までの間 LiDAR を使わないステップ数")
     parser.add_argument("--d-slow", type=float, default=1.0)
     parser.add_argument("--d-stop", type=float, default=0.45)
@@ -117,151 +270,33 @@ def main():
 
     gs.init(backend=gs.gpu if args.backend == "gpu" else gs.cpu, logging_level="warning")
     print(f"[go2_patrol] gs.backend={gs.backend}  gs.device={gs.device}")
-
-    log_dir = f"logs/{args.exp_name}"
-    with open(f"{log_dir}/cfgs.pkl", "rb") as f:
-        env_cfg, obs_cfg, reward_cfg, command_cfg, train_cfg = pickle.load(f)
-    reward_cfg["reward_scales"] = {}
-    # go2_env.py は episode_length_s(学習用 20 s)を超えるとタイムアウトでリセットする。
-    # 巡回中にリセットされないよう、上限を max_time より長く上書きする(T01 申し送り)
-    env_cfg["episode_length_s"] = args.max_time + 5.0
-    print(f"[go2_patrol] trained command ranges: vx={command_cfg['lin_vel_x_range']} "
-          f"vy={command_cfg['lin_vel_y_range']} yaw={command_cfg['ang_vel_range']}")
-
-    waypoints = WAYPOINT_SETS[args.waypoints]
-    obstacles, scene_meta = make_obstacles(args.seed, return_spec=True)
-    if args.seed >= 0:
-        scene_file = save_scene(scene_meta)
-        print(f"[go2_patrol] scene seed={args.seed}: {scene_meta['n_placed']} obstacles -> {scene_file}")
-    camera_mode = args.camera or ("overhead" if args.seed >= 0 else "follow")
-    if camera_mode == "overhead":
-        camera_cfg = dict(res=tuple(args.res), pos=(1.0, -4.0, 4.0), lookat=(1.0, 1.0, 0.0), fov=50, GUI=False)
-    else:
-        camera_cfg = dict(res=tuple(args.res), pos=(4.0, -4.0, 3.0), lookat=(1.0, 1.0, 0.3), fov=45, GUI=False)
-    lidar_cfg = make_lidar_cfg(min_range=args.lidar_min_range)
-
-    env = Go2Env(num_envs=1, env_cfg=env_cfg, obs_cfg=obs_cfg, reward_cfg=reward_cfg,
-                 command_cfg=command_cfg, show_viewer=False, camera_cfg=camera_cfg,
-                 lidar_cfg=lidar_cfg, obstacles=obstacles)
-    max_range = lidar_cfg["max_range"]
-    # (markers は scene.build() の前に追加する必要があるため、Go2Env の内部で足すのが本来。
-    #  本スクリプトでは簡単のため省略し、--markers 指定時は警告だけ出す)
-    if args.markers:
-        print("[go2_patrol] --markers はこの版では未実装(build 前に add_entity が必要)。段階 5 で go2_env.py に追加予定")
-    cam = env.cam
-
-    runner = OnPolicyRunner(env, train_cfg, log_dir, device=gs.device)
-    runner.load(os.path.join(log_dir, f"model_{args.ckpt}.pt"))
-    policy = runner.get_inference_policy(device=gs.device)
-
-    env._resample_commands = lambda envs_idx: None   # 指令は追従則で与える
-    follower = WaypointFollower(waypoints, loop=args.waypoints != "line")
-    max_laps_idx = int(len(waypoints) * args.laps)
-    avoider = ObstacleAvoider(d_slow=args.d_slow, d_stop=args.d_stop, k_avoid=args.k_avoid,
-                              rate_limit=args.rate_limit, w_half=args.w_half,
-                              front_mode=args.front_mode) if args.avoid else None
-    print(f"[go2_patrol] avoid={'on ' + str(avoider.params()) if avoider else 'off'}")
-
-    obs_dict = env.reset()
-    cam.start_recording(save_to_filename=args.out, fps=args.fps)
-    t0 = time.time()
-    n_steps, reached, log = 0, 0, []
-    end_reason = "timeout"   # max_time まで走り切った場合。完了 / 転倒で上書きする
-    scan, sectors = None, None
-    n_collision, first_collision_t = 0, None
-    n_contact, first_contact_t = 0, None          # 物理接触(robot と障害物の contact)による衝突。LiDAR 判定の検証用
-    n_raw_hit_steps, n_raw_hits, n_hits_after = 0, 0, 0   # 地面除去の検証用(raw / 除去後のヒット数)
-    with torch.no_grad():
-        while n_steps * env.dt < args.max_time:
-            # env.base_pos / base_euler は step() 内で更新されるため reset 直後は未定義 → ロボットから直接読む
-            pos = env.robot.get_pos()[0].cpu().numpy()
-            yaw = float(quat_to_xyz(env.robot.get_quat(), rpy=True, degrees=False)[0, 2])
-            prev_idx = follower.idx
-            vx, vy, wz = follower(pos[:2], yaw)
-            if follower.idx != prev_idx:
-                reached += 1
-                print(f"[go2_patrol] t={n_steps * env.dt:5.1f}s reached waypoint {prev_idx} at ({pos[0]:.2f}, {pos[1]:.2f})")
-                if reached >= max_laps_idx and args.waypoints != "line":
-                    end_reason = "completed"
-                    break
-            if follower.done:
-                end_reason = "completed"
-                break
-            vx_follow, wz_follow = vx, wz
-            if avoider is not None and scan is not None:
-                vx, wz = avoider(scan, vx, wz)
-            av = avoider.last if avoider is not None else {}
-            env.commands[:] = torch.tensor([vx, vy, wz], dtype=gs.tc_float, device=gs.device)
-            actions = policy(obs_dict)
-            obs_dict, rews, dones, infos = env.step(actions)
-            if camera_mode == "follow":
-                cam.set_pose(pos=(pos[0] + 3.0, pos[1] - 3.0, 2.2), lookat=(pos[0], pos[1], 0.3))
-            # LiDAR(着地後から使う)。衝突 = 地面除去後の最小距離 < collision_dist
-            min_dist, collision, raw_hits, hits = max_range, 0, 0, 0
-            if n_steps >= args.lidar_warmup:
-                scan, raw = read_scan(env, return_raw=True)
-                sectors = sector_min(scan)
-                min_dist = float(scan.min())
-                raw_hits, hits = int(np.sum(raw < max_range)), int(np.sum(scan < max_range))
-                n_raw_hit_steps += raw_hits > 0
-                n_raw_hits += raw_hits
-                n_hits_after += hits
-                if min_dist < args.collision_dist:
-                    collision = 1
-                    n_collision += 1
-                    if first_collision_t is None:
-                        first_collision_t = n_steps * env.dt
-                        print(f"[go2_patrol] collision at t={first_collision_t:.1f}s min_dist={min_dist:.2f}")
-            contact = 0
-            for obs in env.obstacles:
-                c = env.robot.get_contacts(with_entity=obs)
-                n_c = int(c["valid_mask"].sum()) if "valid_mask" in c else len(c["position"])
-                if n_c > 0:
-                    contact = 1
-                    break
-            if contact:
-                n_contact += 1
-                if first_contact_t is None:
-                    first_contact_t = n_steps * env.dt
-                    print(f"[go2_patrol] contact with obstacle at t={first_contact_t:.1f}s (lidar min_dist={min_dist:.2f})")
-            log.append((n_steps * env.dt, pos[0], pos[1], math.degrees(yaw), vx, wz, min_dist, collision, raw_hits, hits,
-                        contact, vx_follow, wz_follow, av.get("d_front", np.inf), av.get("hit_lat", 0.0),
-                        avoider.side if avoider is not None else 0))
-            n_steps += 1
-            if bool(dones[0]):
-                # 環境のエピソード上限によるリセット(time_outs)と転倒(pitch/roll 超過)を区別する
-                if bool(infos["time_outs"][0]):
-                    end_reason = "timeout"
-                    print(f"[go2_patrol] timeout (env episode limit) at t={n_steps * env.dt:.1f}s")
-                else:
-                    end_reason = "fell"
-                    print(f"[go2_patrol] fell at t={n_steps * env.dt:.1f}s (cmd vx={vx:.2f}, yaw_rate={wz:.2f})")
-                break
-    cam.stop_recording()
-    elapsed = time.time() - t0
-    np.savetxt(os.path.splitext(args.out)[0] + "_log.csv", np.array(log), delimiter=",", fmt="%.4f",
-               header="t,x,y,yaw_deg,cmd_vx,cmd_yaw,min_dist,collision,raw_hits,hits,contact,"
-                      "follow_vx,follow_yaw,d_front,hit_lat,avoid_side", comments="")
-    sim_s = n_steps * env.dt
-    print(f"[go2_patrol] wrote {args.out}: {n_steps} steps, sim {sim_s:.1f}s, wall {elapsed:.1f}s, "
-          f"waypoints reached {reached}/{max_laps_idx}, end reason: {end_reason}")
-    print(f"[go2_patrol] collision steps={n_collision} first={first_collision_t}; "
-          f"contact steps={n_contact} first={first_contact_t}; "
-          f"lidar: steps with raw hits={n_raw_hit_steps}/{max(n_steps - args.lidar_warmup, 0)}, "
-          f"raw hits total={n_raw_hits}, hits after ground removal={n_hits_after}")
+    avoid_kwargs = dict(d_slow=args.d_slow, d_stop=args.d_stop, k_avoid=args.k_avoid, rate_limit=args.rate_limit,
+                        w_half=args.w_half, front_mode=args.front_mode)
+    r = run_patrol(args.exp_name, args.ckpt, seed=args.seed, avoid=args.avoid, waypoints=args.waypoints, laps=args.laps,
+                   max_time=args.max_time, out=None if args.no_video else args.out, camera=args.camera, res=args.res,
+                   fps=args.fps, collision_dist=args.collision_dist, lidar_warmup=args.lidar_warmup,
+                   avoid_kwargs=avoid_kwargs, lidar_min_range=args.lidar_min_range)
+    log_path = os.path.splitext(args.out)[0] + "_log.csv"
+    np.savetxt(log_path, r["log"], delimiter=",", fmt="%.4f", header=LOG_HEADER, comments="")
+    print(f"[go2_patrol] wrote {'(no video) ' + log_path if args.no_video else args.out}: {r['n_steps']} steps, "
+          f"sim {r['sim_s']:.1f}s, wall {r['wall_s']:.1f}s, waypoints reached {r['reached']}/{r['max_laps_idx']}, "
+          f"end reason: {r['end_reason']}")
+    print(f"[go2_patrol] collision steps={r['n_collision']} first={r['first_collision_t']}; "
+          f"contact steps={r['n_contact']} first={r['first_contact_t']}; path length={r['path_length']:.2f} m; "
+          f"lidar: steps with raw hits={r['n_raw_hit_steps']}/{r['lidar_steps']}, raw hits total={r['n_raw_hits']}, "
+          f"hits after ground removal={r['n_hits_after']}")
     if args.summary_csv:
         os.makedirs(os.path.dirname(args.summary_csv) or ".", exist_ok=True)
         new = not os.path.exists(args.summary_csv)
         with open(args.summary_csv, "a", encoding="utf-8") as f:
             if new:
-                f.write("exp_name,ckpt,backend,waypoints,seed,n_obstacles,avoid,reached,n_waypoints,end_reason,sim_s,"
-                        "wall_s,collision_steps,first_collision_s,contact_steps,first_contact_s,"
-                        "raw_hit_steps,raw_hits,hits_after,out\n")
-            f.write(f"{args.exp_name},{args.ckpt},{gs.backend},{args.waypoints},{args.seed},{len(obstacles)},"
-                    f"{int(args.avoid)},{reached},{max_laps_idx},{end_reason},{sim_s:.2f},{elapsed:.1f},{n_collision},"
-                    f"{'' if first_collision_t is None else f'{first_collision_t:.2f}'},{n_contact},"
-                    f"{'' if first_contact_t is None else f'{first_contact_t:.2f}'},{n_raw_hit_steps},{n_raw_hits},"
-                    f"{n_hits_after},{args.out}\n")
+                f.write(SUMMARY_HEADER + "\n")
+            fc = "" if r["first_collision_t"] is None else f"{r['first_collision_t']:.2f}"
+            ft = "" if r["first_contact_t"] is None else f"{r['first_contact_t']:.2f}"
+            f.write(f"{args.exp_name},{args.ckpt},{gs.backend},{args.waypoints},{args.seed},{r['n_placed']},"
+                    f"{int(args.avoid)},{r['reached']},{r['max_laps_idx']},{r['end_reason']},{r['sim_s']:.2f},"
+                    f"{r['wall_s']:.1f},{r['n_collision']},{fc},{r['n_contact']},{ft},{r['n_raw_hit_steps']},"
+                    f"{r['n_raw_hits']},{r['n_hits_after']},{args.out}\n")
 
 
 if __name__ == "__main__":
