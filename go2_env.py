@@ -13,7 +13,8 @@ def gs_rand(lower, upper, batch_shape):
 
 
 class Go2Env:
-    def __init__(self, num_envs, env_cfg, obs_cfg, reward_cfg, command_cfg, show_viewer=False, camera_cfg=None):
+    def __init__(self, num_envs, env_cfg, obs_cfg, reward_cfg, command_cfg, show_viewer=False, camera_cfg=None,
+                 lidar_cfg=None, obstacles=None):
         self.num_envs: int = num_envs
         self.num_actions = env_cfg["num_actions"]
         self.cfg = env_cfg
@@ -74,6 +75,20 @@ class Go2Env:
         # --- added for headless recording (go2_record.py) ---
         # add_camera() must be called before scene.build()
         self.cam = self.scene.add_camera(**camera_cfg) if camera_cfg is not None else None
+
+        # --- added for obstacle scenes (eval/lidar_test.py, T03/T04) ---
+        # obstacles: list of gs.morphs (e.g. Box / Cylinder with fixed=True). add_entity() must precede scene.build()
+        self.obstacles = [self.scene.add_entity(morph) for morph in obstacles] if obstacles else []
+
+        # --- added for pseudo 2D LiDAR (nav/lidar.py) ---
+        # lidar_cfg: kwargs for gs.options.sensors.Raycaster. entity_idx defaults to the robot (caller does not know it).
+        # add_sensor() must be called before scene.build()
+        self.lidar_cfg = dict(lidar_cfg) if lidar_cfg is not None else None
+        if self.lidar_cfg is not None:
+            self.lidar_cfg.setdefault("entity_idx", self.robot.idx)
+            self.lidar = self.scene.add_sensor(gs.options.sensors.Raycaster(**self.lidar_cfg))
+        else:
+            self.lidar = None
 
         self.scene.build(n_envs=num_envs)
 

@@ -32,6 +32,7 @@ Physical AI 2026 応用編1 最終課題。Genesis 上で Unitree Go2 を強化�
 - `scene.add_camera()` / `scene.add_sensor()` / `scene.add_entity()` は **`scene.build()` の前**に呼ぶ。`Go2Env.__init__` に `camera_cfg` のような差し込み口を足す形で対応する
 - `env.base_pos` / `env.base_euler` は `step()` 内で更新されるため、`reset()` 直後は未定義。姿勢は `env.robot.get_pos()` / `get_quat()` から読む(`go2_patrol.py` 参照)
 - `base_euler` は度(deg)、`quat_to_xyz(..., degrees=False)` はラジアン
+- **エピソード上限**: `go2_env.py` は `episode_length_s=20` を超えると `reset_buf` を立ててリセットする(学習用の仕様)。評価・巡回スクリプトでは `cfgs.pkl` 読込後に `env_cfg["episode_length_s"]` を十分大きく上書きし、`dones` は `infos["time_outs"]` で転倒と区別する(T01 申し送り)
 - 疑似 LiDAR: `gs.options.sensors.Raycaster(pattern=gs.options.sensors.SphericalPattern(...), entity_idx=..., link_idx_local=..., pos_offset=..., max_range=..., return_points=False)` を `scene.add_sensor()` で追加し、`sensor.read()` で距離配列。**Metal での動作は未検証**(T02 で確認)
 
 ## 制約(提出要件)

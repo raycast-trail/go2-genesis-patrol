@@ -1,0 +1,6 @@
+backend,return_points,steps,ms_step,ms_read_scan,ms_total,front_m,right_m,left_m,back_m,n_hits,n_spurious,max_abs_err_m,seed
+gs.metal,True,100,20.568,0.674,21.241,1.341,1.856,5.000,5.000,5,0,0.002,0
+gs.metal,False,100,23.540,0.485,24.025,1.341,1.856,5.000,5.000,5,0,0.002,0
+gs.metal,no_lidar,100,10.167,0.000,10.167,,,,,,,,0
+gs.cpu,True,100,2.079,0.037,2.117,1.341,1.856,5.000,5.000,5,0,0.002,0
+gs.cpu,no_lidar,100,1.011,0.000,1.011,,,,,,,,0

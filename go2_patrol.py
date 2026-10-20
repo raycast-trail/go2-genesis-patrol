@@ -100,6 +100,9 @@ def main():
     with open(f"{log_dir}/cfgs.pkl", "rb") as f:
         env_cfg, obs_cfg, reward_cfg, command_cfg, train_cfg = pickle.load(f)
     reward_cfg["reward_scales"] = {}
+    # go2_env.py は episode_length_s(学習用 20 s)を超えるとタイムアウトでリセットする。
+    # 巡回中にリセットされないよう、上限を max_time より長く上書きする(T01 申し送り)
+    env_cfg["episode_length_s"] = args.max_time + 5.0
     print(f"[go2_patrol] trained command ranges: vx={command_cfg['lin_vel_x_range']} "
           f"vy={command_cfg['lin_vel_y_range']} yaw={command_cfg['ang_vel_range']}")
 
@@ -126,6 +129,7 @@ def main():
     cam.start_recording(save_to_filename=args.out, fps=args.fps)
     t0 = time.time()
     n_steps, reached, log = 0, 0, []
+    end_reason = "timeout"   # max_time まで走り切った場合。完了 / 転倒で上書きする
     with torch.no_grad():
         while n_steps * env.dt < args.max_time:
             # env.base_pos / base_euler は step() 内で更新されるため reset 直後は未定義 → ロボットから直接読む
@@ -137,8 +141,10 @@ def main():
                 reached += 1
                 print(f"[go2_patrol] t={n_steps * env.dt:5.1f}s reached waypoint {prev_idx} at ({pos[0]:.2f}, {pos[1]:.2f})")
                 if reached >= max_laps_idx and args.waypoints != "line":
+                    end_reason = "completed"
                     break
             if follower.done:
+                end_reason = "completed"
                 break
             env.commands[:] = torch.tensor([vx, vy, wz], dtype=gs.tc_float, device=gs.device)
             actions = policy(obs_dict)
@@ -147,14 +153,20 @@ def main():
             log.append((n_steps * env.dt, pos[0], pos[1], math.degrees(yaw), vx, wz))
             n_steps += 1
             if bool(dones[0]):
-                print(f"[go2_patrol] fell at t={n_steps * env.dt:.1f}s (cmd vx={vx:.2f}, yaw_rate={wz:.2f})")
+                # 環境のエピソード上限によるリセット(time_outs)と転倒(pitch/roll 超過)を区別する
+                if bool(infos["time_outs"][0]):
+                    end_reason = "timeout"
+                    print(f"[go2_patrol] timeout (env episode limit) at t={n_steps * env.dt:.1f}s")
+                else:
+                    end_reason = "fell"
+                    print(f"[go2_patrol] fell at t={n_steps * env.dt:.1f}s (cmd vx={vx:.2f}, yaw_rate={wz:.2f})")
                 break
     cam.stop_recording()
     elapsed = time.time() - t0
     np.savetxt(os.path.splitext(args.out)[0] + "_log.csv", np.array(log), delimiter=",", fmt="%.4f",
                header="t,x,y,yaw_deg,cmd_vx,cmd_yaw", comments="")
     print(f"[go2_patrol] wrote {args.out}: {n_steps} steps, sim {n_steps * env.dt:.1f}s, wall {elapsed:.1f}s, "
-          f"waypoints reached {reached}/{max_laps_idx}")
+          f"waypoints reached {reached}/{max_laps_idx}, end reason: {end_reason}")
 
 
 if __name__ == "__main__":

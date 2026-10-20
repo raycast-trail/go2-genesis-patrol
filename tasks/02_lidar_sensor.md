@@ -33,6 +33,7 @@ pts = torch.as_tensor(r.points)      # shape (n_envs, 72, 1, 3)、world 座標
    - 100 ステップの `env.step()+read_scan()` の平均時間を計測(ms)
    - `results/t02_scan.png`: 極座標プロット(距離 vs 角度)に障害物の期待位置を重ねる
 4. Metal(`--backend gpu`)と CPU(`--backend cpu`)の両方で実行し、結果が一致するか確認
+5. **T01 申し送り対応(20 s エピソード上限)**: `go2_patrol.py` で `cfgs.pkl` を読んだ直後に `env_cfg["episode_length_s"] = args.max_time + 5.0` と上書きし、タイムアウトリセットが巡回中に起きないようにする。あわせて `dones` が立ったときは `infos["time_outs"][0]` を見て「timeout」と「fell」を区別してログに出す。確認: `python go2_patrol.py -e go2-walking --ckpt 100 --waypoints square --max-time 40 --out /tmp/t02_timeout_check.mp4` を実行し、20 s でリセットされず 40 s まで走って `timeout` で終わること(既定方策は旋回できないので到達 1/4 のまま)
 
 ## 受け入れ条件
 - [ ] Metal で `lidar_test.py` がエラーなく動く
@@ -40,12 +41,13 @@ pts = torch.as_tensor(r.points)      # shape (n_envs, 72, 1, 3)、world 座標
 - [ ] 地面除去後に、障害物以外のレイがすべて max_range
 - [ ] 1 ステップ(sim + read)が **10 ms 以下**(Metal)。超える場合は `return_points=False` にして地面除去を「距離 > 床までの幾何距離」で近似する案を報告に書く(実装はしない)
 - [ ] `results/t02_scan.png` と `reports/02_lidar_sensor.md`(Metal/CPU の計測表つき)
+- [ ] 手順 5 の確認で、既定方策の巡回が 20 s でリセットされず 40 s まで走り、終了理由が `timeout` と表示される
 
 ## 調整候補(最大 2 つ)
 1. 自己遮蔽が出る場合: `pos_offset` の z を 0.15 → 0.25、`min_range` を 0.3 → 0.4
 2. Metal で Raycaster が動かない場合: 障害物の位置は既知なので、`nav/lidar.py` に幾何計算の仮想スキャン(各レイと Box/Cylinder の交点)を実装し、同じ `read_scan` インターフェースで返す。設計書 §9 の代替案。どちらを使ったかをレポートに明記
 
 ## 成果物
-- `go2_env.py`(lidar_cfg, obstacles 引数)、`nav/lidar.py`、`eval/lidar_test.py`
+- `go2_env.py`(lidar_cfg, obstacles 引数)、`nav/lidar.py`、`eval/lidar_test.py`、`go2_patrol.py`(episode_length_s 上書き、timeout/fell の区別)
 - `results/t02_scan.png`、`results/t02_timing.csv`
 - `reports/02_lidar_sensor.md`
