@@ -32,6 +32,7 @@ def main():
     parser.add_argument("--reach-dist", type=float, default=0.3)
     parser.add_argument("--out", type=str, required=True)
     parser.add_argument("--title", type=str, default=None)
+    parser.add_argument("--scene", type=str, default=None, help="results/scenes/seed_NN.json(障害物を描く)")
     args = parser.parse_args()
 
     labels = args.label or [os.path.basename(p).replace("_log.csv", "") for p in args.log]
@@ -43,6 +44,17 @@ def main():
     for i, (x, y) in enumerate(wps[1:]):
         ax.add_patch(plt.Circle((x, y), args.reach_dist, fill=False, ec="gray", ls=":", lw=0.8))
         ax.annotate(f"WP{i}", (x, y), textcoords="offset points", xytext=(6, 6), fontsize=9, color="gray")
+    if args.scene:
+        import json
+        with open(args.scene, encoding="utf-8") as f:
+            meta = json.load(f)
+        for o in meta["obstacles"]:
+            x, y = o["pos"]
+            if o["type"] == "box":
+                sx, sy = o["size"][0], o["size"][1]
+                ax.add_patch(plt.Rectangle((x - sx / 2, y - sy / 2), sx, sy, fc="dimgray", ec="k", alpha=0.8))
+            else:
+                ax.add_patch(plt.Circle((x, y), o["radius"], fc="dimgray", ec="k", alpha=0.8))
     colors = ["tab:blue", "tab:orange", "tab:green", "tab:red"]
     for k, (path, lab) in enumerate(zip(args.log, labels)):
         d = np.loadtxt(path, delimiter=",", skiprows=1, ndmin=2)
@@ -50,6 +62,10 @@ def main():
         ax.plot(x, y, color=colors[k % len(colors)], lw=1.6, label=f"{lab} ({t[-1]:.1f}s)")
         ax.plot(x[0], y[0], "o", color=colors[k % len(colors)], ms=5)
         ax.plot(x[-1], y[-1], "x", color=colors[k % len(colors)], ms=8, mew=2)
+        if d.shape[1] >= 8:   # collision 列(T03 以降のログ)
+            c = d[:, 7] > 0.5
+            if c.any():
+                ax.plot(x[c], y[c], ".", color="red", ms=6, label=f"{lab}: collision ({int(c.sum())} steps)")
     ax.set_aspect("equal")
     ax.set_xlabel("x [m]")
     ax.set_ylabel("y [m]")

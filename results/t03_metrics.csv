@@ -1,0 +1,8 @@
+exp_name,ckpt,backend,waypoints,seed,n_obstacles,avoid,reached,n_waypoints,end_reason,sim_s,wall_s,collision_steps,first_collision_s,contact_steps,first_contact_s,raw_hit_steps,raw_hits,hits_after,out
+go2-patrol,299,gs.cpu,square,0,5,1,4,4,completed,28.62,14.3,0,,0,,1426,16240,16051,videos/t03_seed0.mp4
+go2-patrol,299,gs.cpu,square,0,5,0,4,4,completed,41.80,19.6,40,39.62,1272,13.50,2085,27578,27552,t03_seed0_noavoid.mp4
+go2-patrol,299,gs.cpu,square,1,4,1,4,4,completed,20.18,10.8,0,,0,,1004,14216,14108,videos/t03_seed1.mp4
+go2-patrol,299,gs.cpu,square,1,4,0,4,4,completed,16.26,8.8,40,5.58,9,5.28,808,11299,11283,t03_seed1_noavoid.mp4
+go2-patrol,299,gs.cpu,square,2,5,1,4,4,completed,26.02,13.1,0,,0,,1296,15752,15591,videos/t03_seed2.mp4
+go2-patrol,299,gs.cpu,square,2,5,0,4,4,completed,16.44,8.7,84,6.14,9,6.24,817,10110,10070,t03_seed2_noavoid.mp4
+go2-patrol,299,gs.cpu,square,-1,0,1,4,4,completed,16.14,8.4,0,,0,,0,0,0,t03_noobs.mp4

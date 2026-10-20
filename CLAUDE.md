@@ -21,6 +21,8 @@ Physical AI 2026 応用編1 最終課題。Genesis 上で Unitree Go2 を強化�
 
 ## 実測済みの性能(目安)
 
+- **バックエンドの使い分け**: 学習(数千 env)は Metal、**1 env の評価・録画は `--backend cpu`**(T02 実測: Metal 21 ms/step、CPU 2.1 ms/step、LiDAR 値は完全一致)
+
 - 初回実行は JIT コンパイルで 1〜3 分無言になる(正常)
 - 学習: 4096 env で約 67,000 steps/s、既定例題 101 it = 約 4 分。300 it なら約 10 分
 - 録画: 1280×720 で約 39 steps/s(1 分の動画 = 3,000 steps ≈ 80 秒)

@@ -24,7 +24,7 @@ GROUND_Z = 0.05          # これより低いヒット点は床とみなす [m]
 
 DEFAULT_LIDAR_CFG = dict(
     pos_offset=(0.0, 0.0, 0.15),   # base リンク原点からの取り付け位置
-    min_range=0.3,
+    min_range=0.0,                 # T02 では 0.3 だったが、衝突判定(< 0.25 m)に近接ヒットが要るため 0 に(T03)
     max_range=5.0,
     return_points=True,            # 地面除去にヒット点の z が要る
     return_world_frame=True,
@@ -39,8 +39,8 @@ def make_lidar_cfg(**overrides):
     return cfg
 
 
-def read_scan(env, env_idx=0, ground_z=GROUND_Z):
-    """距離配列 (72,) を返す。地面除去と min_range 未満の除去を行う。"""
+def read_scan(env, env_idx=0, ground_z=GROUND_Z, return_raw=False):
+    """距離配列 (72,) を返す。地面除去と min_range 未満の除去を行う。return_raw=True なら (scan, raw) を返す。"""
     r = env.lidar.read()
     max_range = float(env.lidar_cfg.get("max_range", 20.0))
     min_range = float(env.lidar_cfg.get("min_range", 0.0))
@@ -52,7 +52,7 @@ def read_scan(env, env_idx=0, ground_z=GROUND_Z):
         hit = scan < max_range
         scan[hit & (pts[:, 2] < ground_z)] = max_range
     scan[scan < min_range] = max_range
-    return scan
+    return (scan, d) if return_raw else scan
 
 
 def sector_min(scan, n_sectors=12):
