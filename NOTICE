@@ -1,0 +1,12 @@
+go2-genesis-patrol
+
+This repository contains code derived from the Genesis project
+(https://github.com/Genesis-Embodied-AI/genesis-world), licensed under the
+Apache License, Version 2.0. Specifically:
+
+  go2_env.py   - derived from examples/locomotion/go2_env.py   (v1.4.4, commit a649105)
+                 modified: added optional camera_cfg / lidar_cfg hooks before scene.build()
+  go2_train.py - copied from examples/locomotion/go2_train.py  (v1.4.4, commit a649105), unmodified
+
+All other files are original work for the Physical AI 2026 応用編1 final assignment,
+also released under the Apache License, Version 2.0.

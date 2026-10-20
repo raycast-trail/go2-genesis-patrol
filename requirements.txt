@@ -1,0 +1,8 @@
+# Python 3.10–3.13. macOS (Apple Silicon, Metal) で動作確認。CUDA でも可。
+torch
+genesis-world==1.4.4
+rsl-rl-lib>=5.0.0
+tensorboard
+numpy
+pandas
+matplotlib
