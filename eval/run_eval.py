@@ -28,7 +28,7 @@ STRAIGHT_LENGTH = {"square": 8.0}  # ウェイポイント間直線距離の合�
 FIELDS = ["policy", "ckpt", "backend", "waypoints", "seed", "scene_seed", "n_placed", "avoid", "reached", "n_waypoints",
           "success", "fell", "end_reason", "contact", "contact_steps", "first_contact_s", "near_miss", "near_miss_steps",
           "first_near_miss_s", "min_lidar_m", "time_to_complete", "sim_s", "path_length_m", "path_efficiency",
-          "wall_s", "raw_hit_steps", "raw_hits", "hits_after"]
+          "wall_s", "raw_hit_steps", "raw_hits", "hits_after", "avoid_version"]
 
 
 def parse_seeds(s):
@@ -59,6 +59,9 @@ def main():
     parser.add_argument("--backend", choices=["gpu", "cpu"], default="cpu")
     parser.add_argument("--waypoints", choices=list(WAYPOINT_SETS), default="square")
     parser.add_argument("--out", type=str, default="results/eval/episodes.csv")
+    parser.add_argument("--avoid-version", choices=["v1", "v2"], default="v2", help="回避則(nav/avoid.py)。T04 は v1")
+    parser.add_argument("--t-commit", type=float, default=2.0)
+    parser.add_argument("--t-clear", type=float, default=1.0)
     args = parser.parse_args()
 
     policies = [(p.split(":")[0], int(p.split(":")[1])) for p in args.policies.split(",")]
@@ -67,7 +70,7 @@ def main():
     done = load_done(args.out)
     todo = [(seed, pol, ck, av) for seed in seeds for pol, ck in policies for av in avoids
             if (pol, av, seed) not in done]
-    print(f"[run_eval] {len(todo)} episodes to run ({len(done)} already in {args.out})")
+    print(f"[run_eval] {len(todo)} episodes to run ({len(done)} already in {args.out}); avoid_version={args.avoid_version}")
     if not todo:
         return
 
@@ -80,7 +83,8 @@ def main():
         scene_seed = -1 if seed < N_OBSTACLE_FREE_SEEDS else seed
         t0 = time.time()
         r = run_patrol(pol, ck, seed=scene_seed, avoid=bool(av), waypoints=args.waypoints, max_time=args.max_time,
-                       out=None, verbose=False)
+                       out=None, verbose=False, avoid_version=args.avoid_version,
+                       avoid_kwargs=dict(T_commit=args.t_commit, T_clear=args.t_clear))
         wall = time.time() - t0
         fell = int(r["end_reason"] == "fell")
         contact = int(r["n_contact"] > 0)
@@ -95,7 +99,7 @@ def main():
                    sim_s=f"{r['sim_s']:.2f}", path_length_m=f"{r['path_length']:.3f}",
                    path_efficiency=f"{straight / r['path_length']:.3f}" if r["path_length"] > 0 else "",
                    wall_s=f"{wall:.1f}", raw_hit_steps=r["n_raw_hit_steps"], raw_hits=r["n_raw_hits"],
-                   hits_after=r["n_hits_after"])
+                   hits_after=r["n_hits_after"], avoid_version=args.avoid_version if av else "")
         new = not os.path.exists(args.out)
         with open(args.out, "a", newline="", encoding="utf-8") as f:
             w = csv.DictWriter(f, fieldnames=FIELDS)
