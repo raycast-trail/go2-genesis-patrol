@@ -28,7 +28,7 @@ STRAIGHT_LENGTH = {"square": 8.0}  # ウェイポイント間直線距離の合�
 FIELDS = ["policy", "ckpt", "backend", "waypoints", "seed", "scene_seed", "n_placed", "avoid", "reached", "n_waypoints",
           "success", "fell", "end_reason", "contact", "contact_steps", "first_contact_s", "near_miss", "near_miss_steps",
           "first_near_miss_s", "min_lidar_m", "time_to_complete", "sim_s", "path_length_m", "path_efficiency",
-          "wall_s", "raw_hit_steps", "raw_hits", "hits_after", "avoid_version"]
+          "wall_s", "raw_hit_steps", "raw_hits", "hits_after", "avoid_version", "lidar", "first_contact_type", "contact_types"]
 
 
 def parse_seeds(s):
@@ -47,7 +47,8 @@ def load_done(path):
     if not os.path.exists(path):
         return set()
     with open(path, encoding="utf-8") as f:
-        return {(r["policy"], int(r["avoid"]), int(r["seed"]), r.get("avoid_version", "") if int(r["avoid"]) else "")
+        return {(r["policy"], int(r["avoid"]), int(r["seed"]), r.get("avoid_version", "") if int(r["avoid"]) else "",
+                 r.get("lidar", "2d") or "2d")
                 for r in csv.DictReader(f)}
 
 
@@ -65,6 +66,7 @@ def main():
     parser.add_argument("--t-commit", type=float, default=2.0)
     parser.add_argument("--t-clear", type=float, default=1.0)
     parser.add_argument("--camera-only", action="store_true", help="カメラを作るが録画しない(T07 の再現性対策)")
+    parser.add_argument("--lidar", choices=["2d", "3d"], default="2d", help="T12: 3d = 高さ帯投影の 3D LiDAR")
     args = parser.parse_args()
 
     policies = [(p.split(":")[0], int(p.split(":")[1])) for p in args.policies.split(",")]
@@ -72,7 +74,7 @@ def main():
     seeds = parse_seeds(args.seeds)
     done = load_done(args.out)
     todo = [(seed, pol, ck, av) for seed in seeds for pol, ck in policies for av in avoids
-            if (pol, av, seed, args.avoid_version if av else "") not in done]
+            if (pol, av, seed, args.avoid_version if av else "", args.lidar) not in done]
     print(f"[run_eval] {len(todo)} episodes to run ({len(done)} already in {args.out}); avoid_version={args.avoid_version}")
     if not todo:
         return
@@ -87,7 +89,8 @@ def main():
         t0 = time.time()
         r = run_patrol(pol, ck, seed=scene_seed, avoid=bool(av), waypoints=args.waypoints, max_time=args.max_time,
                        out=None, verbose=False, avoid_version=args.avoid_version,
-                       avoid_kwargs=dict(T_commit=args.t_commit, T_clear=args.t_clear), camera_only=args.camera_only)
+                       avoid_kwargs=dict(T_commit=args.t_commit, T_clear=args.t_clear), camera_only=args.camera_only,
+                       lidar=args.lidar)
         wall = time.time() - t0
         fell = int(r["end_reason"] == "fell")
         contact = int(r["n_contact"] > 0)
@@ -102,16 +105,18 @@ def main():
                    sim_s=f"{r['sim_s']:.2f}", path_length_m=f"{r['path_length']:.3f}",
                    path_efficiency=f"{straight / r['path_length']:.3f}" if r["path_length"] > 0 else "",
                    wall_s=f"{wall:.1f}", raw_hit_steps=r["n_raw_hit_steps"], raw_hits=r["n_raw_hits"],
-                   hits_after=r["n_hits_after"], avoid_version=args.avoid_version if av else "")
+                   hits_after=r["n_hits_after"], avoid_version=args.avoid_version if av else "", lidar=args.lidar,
+                   first_contact_type=r["first_contact_type"] or "", contact_types="+".join(r["contact_types"]))
         new = not os.path.exists(args.out)
         with open(args.out, "a", newline="", encoding="utf-8") as f:
             w = csv.DictWriter(f, fieldnames=FIELDS)
             if new:
                 w.writeheader()
             w.writerow(row)
-        print(f"[run_eval] {k + 1}/{len(todo)} seed={seed:2d} scene={scene_seed:2d} n_obs={r['n_placed']} {pol:11s} "
-              f"avoid={av} -> reached {r['reached']}/{r['max_laps_idx']} {r['end_reason']:9s} success={success} "
-              f"contact={contact}({r['n_contact']}) near_miss={int(r['n_collision'] > 0)} sim={r['sim_s']:.1f}s "
+        print(f"[run_eval] {k + 1}/{len(todo)} seed={seed:3d} scene={scene_seed:3d} n_obs={r['n_placed']} {pol:11s} "
+              f"avoid={av} {args.avoid_version if av else '':2s} {args.lidar} -> reached {r['reached']}/{r['max_laps_idx']} "
+              f"{r['end_reason']:9s} success={success} contact={contact}({r['n_contact']},{r['first_contact_type']}) "
+              f"near_miss={int(r['n_collision'] > 0)} sim={r['sim_s']:.1f}s "
               f"wall={wall:.1f}s (total {time.time() - t_start:.0f}s)", flush=True)
     print(f"[run_eval] done: {len(todo)} episodes in {time.time() - t_start:.0f}s -> {args.out}")
 

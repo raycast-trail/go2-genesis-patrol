@@ -437,6 +437,101 @@ def compare3_main(args):
     print(f"[summarize] wrote {args.out_dir}/summary.png, time_diff_hist.png")
 
 
+def compare_lidar_main(args):
+    """T12: 同じ episodes.csv 内の lidar 2d / 3d(拡張方策 × v3)を seed で対応づけて比較"""
+    df = pd.read_csv(args.compare_lidar)
+    seeds = _parse_range(args.scenes)
+    df = df[(df.policy == "go2-patrol") & (df.seed.isin(seeds))].copy()
+    df["lidar"] = df["lidar"].fillna("2d")
+    df["first_contact_type"] = df["first_contact_type"].fillna("")
+    conds = {"v3 + 2D LiDAR": df[df.lidar == "2d"], "v3 + 3D LiDAR": df[df.lidar == "3d"]}
+    md = [f"## 2D / 3D LiDAR の比較(拡張方策 × v3、混合配置 seed {args.scenes}、60 s 上限)\n",
+          "| 条件 | n | 成功率 [95% CI] | 接触率 [95% CI] | 転倒率 | 平均到達 | 所要 [s](成功分) | 経路効率(成功分) |",
+          "|---|---|---|---|---|---|---|---|"]
+    stats = {}
+    for name, g in conds.items():
+        n = len(g)
+        ks, kc, kf = int(g.success.sum()), int(g.contact.sum()), int(g.fell.sum())
+        succ = g[g.success == 1]
+        cis, cic = wilson_ci(ks, n), wilson_ci(kc, n)
+        t = succ.time_to_complete.astype(float).mean() if len(succ) else float("nan")
+        e = succ.path_efficiency.astype(float).mean() if len(succ) else float("nan")
+        stats[name] = dict(n=n, rate_s=ks / n, rate_c=kc / n, ci_s=cis, ci_c=cic, time=t)
+        md.append(f"| {name} | {n} | {ks}/{n} = {ks / n:.0%} [{cis[0]:.0%}–{cis[1]:.0%}] | {kc}/{n} = {kc / n:.0%} "
+                  f"[{cic[0]:.0%}–{cic[1]:.0%}] | {kf}/{n} | {g.reached.mean():.2f} | {t:.1f} | {e:.2f} |")
+    a, b = conds["v3 + 2D LiDAR"], conds["v3 + 3D LiDAR"]
+    cols = ["seed", "success", "contact", "fell", "sim_s", "reached", "end_reason", "first_contact_type", "contact_types"]
+    m = a[cols].merge(b[cols], on="seed", suffixes=("_2d", "_3d"))
+    md.append("\n## 対応あり比較(同じ seed)\n")
+    for metric, name in [("success", "成功"), ("contact", "接触")]:
+        x2, x3 = m[f"{metric}_2d"].astype(int), m[f"{metric}_3d"].astype(int)
+        b_only, c_only = int(((x2 == 1) & (x3 == 0)).sum()), int(((x2 == 0) & (x3 == 1)).sum())
+        md.append(f"- **{name}** 2D vs 3D(n = {len(m)}): 2D のみ {b_only}、3D のみ {c_only} → McNemar 正確検定 p = {mcnemar_exact(b_only, c_only):.4f}")
+    both = m[(m.success_2d == 1) & (m.success_3d == 1)]
+    if len(both):
+        diffs = (both.sim_s_3d - both.sim_s_2d).to_numpy()
+        n_pos, n_neg = int((diffs > 0.5).sum()), int((diffs < -0.5).sum())
+        md.append(f"- **所要時間**(両方成功した {len(both)} 配置): 2D 平均 {both.sim_s_2d.mean():.1f} s、3D 平均 {both.sim_s_3d.mean():.1f} s、"
+                  f"差(3D − 2D)の中央値 {np.median(diffs):+.1f} s。3D が速い {n_neg} / 遅い {n_pos} → 符号検定 p = {sign_test(n_pos, n_neg):.4f}")
+    md.append("\n## 失敗の内訳(障害物タイプ別)\n")
+    md.append("| 条件 | 低い箱に接触 | テーブル天板に接触 | テーブル脚に接触 | 高い障害物に接触 | 転倒 | 時間切れ(接触なし) | 成功 |")
+    md.append("|---|---|---|---|---|---|---|---|")
+    for name, g in conds.items():
+        fc = g.first_contact_type.astype(str)
+        ct = g.contact_types.fillna("").astype(str)
+        low = int(ct.str.contains("lowbox").sum())
+        top = int(ct.str.contains("table_top").sum())
+        leg = int(ct.str.contains("table_leg").sum())
+        high = int((ct.str.contains("box(?!_)|cylinder", regex=True) & ~ct.str.contains("lowbox")).sum())
+        fell = int(g.fell.sum())
+        to = int(((g.end_reason == "timeout") & (g.contact == 0)).sum())
+        md.append(f"| {name} | {low} | {top} | {leg} | {high} | {fell} | {to} | {int(g.success.sum())} |")
+    md.append("\n(接触は 1 エピソード内で複数タイプに当たることがあるので合計は接触エピソード数を超えうる)")
+    md.append("\n## seed ごと\n")
+    md.append("| seed | 2D 到達 | 成功 | 接触(最初の相手) | 所要 [s] | 3D 到達 | 成功 | 接触(最初の相手) | 所要 [s] |")
+    md.append("|---|---|---|---|---|---|---|---|---|")
+    for _, r in m.sort_values("seed").iterrows():
+        md.append(f"| {int(r.seed)} | {int(r.reached_2d)}/4 | {int(r.success_2d)} | {int(r.contact_2d)} ({r.first_contact_type_2d or '—'}) | {r.sim_s_2d:.1f} | "
+                  f"{int(r.reached_3d)}/4 | {int(r.success_3d)} | {int(r.contact_3d)} ({r.first_contact_type_3d or '—'}) | {r.sim_s_3d:.1f} |")
+    text = "\n".join(md)
+    os.makedirs(args.out_dir, exist_ok=True)
+    with open(os.path.join(args.out_dir, "summary.md"), "w", encoding="utf-8") as f:
+        f.write(text + "\n")
+    pd.DataFrame([dict(cond=k, **{kk: (vv if not isinstance(vv, tuple) else f"{vv[0]:.3f}-{vv[1]:.3f}") for kk, vv in v.items()})
+                  for k, v in stats.items()]).to_csv(os.path.join(args.out_dir, "summary.csv"), index=False)
+    print(text)
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    labels = ["v3 + 2D", "v3 + 3D"]
+    colors = ["#2a78d6", "#1baf7a"]
+    fig, axes = plt.subplots(1, 3, figsize=(11, 4.2))
+    for ax, (key, title) in zip(axes, [("rate_s", "Success rate"), ("rate_c", "Contact rate"), ("time", "Mean time to complete [s]")]):
+        for i, (name, st) in enumerate(stats.items()):
+            v = st[key]
+            ax.bar(i, v, 0.6, color=colors[i])
+            if key != "time":
+                lo, hi = st["ci_s"] if key == "rate_s" else st["ci_c"]
+                ax.errorbar(i, v, yerr=[[v - lo], [hi - v]], fmt="none", ecolor="#333333", capsize=4, lw=1)
+                ax.text(i, min(hi, 1.0) + 0.03, f"{v:.0%}", ha="center", va="bottom", fontsize=9)
+            elif not np.isnan(v):
+                ax.text(i, v + 0.5, f"{v:.1f}", ha="center", va="bottom", fontsize=9)
+        ax.set_xticks(range(2))
+        ax.set_xticklabels(labels)
+        ax.set_title(title, fontsize=11)
+        if key != "time":
+            ax.set_ylim(0, 1.18)
+            ax.set_yticks([0, 0.25, 0.5, 0.75, 1.0])
+            ax.set_yticklabels(["0%", "25%", "50%", "75%", "100%"])
+        ax.grid(axis="y", alpha=0.25)
+        for sp in ["top", "right"]:
+            ax.spines[sp].set_visible(False)
+    fig.suptitle(f"Low obstacles and tables: 2D vs 3D LiDAR (v3, {stats['v3 + 2D LiDAR']['n']} mixed scenes). Error bars: Wilson 95% CI", fontsize=11)
+    fig.tight_layout()
+    fig.savefig(os.path.join(args.out_dir, "summary.png"), dpi=150, bbox_inches="tight")
+    print(f"[summarize] wrote {args.out_dir}/summary.png")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--episodes", type=str, default="results/eval/episodes.csv")
@@ -446,8 +541,12 @@ def main():
     parser.add_argument("--rerun", type=str, default=None, help="v1 回避ありの再実行 episodes.csv(再現性の計測)")
     parser.add_argument("--compare3", type=str, default=None, metavar="CSV",
                         help="1 つの episodes.csv 内の v1 回避なし / v1 回避あり / v2 回避あり を比較(T07)")
-    parser.add_argument("--scenes", type=str, default="5-49", help="--compare3 で使う seed 範囲")
+    parser.add_argument("--scenes", type=str, default="5-49", help="--compare3 / --compare-lidar で使う seed 範囲")
+    parser.add_argument("--compare-lidar", type=str, default=None, metavar="CSV", help="T12: lidar 2d / 3d の比較(v3)")
     args = parser.parse_args()
+    if args.compare_lidar:
+        compare_lidar_main(args)
+        return
     if args.compare3:
         compare3_main(args)
         return

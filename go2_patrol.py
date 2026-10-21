@@ -40,7 +40,7 @@ import genesis as gs
 from genesis.utils.geom import quat_to_xyz
 
 from go2_env import Go2Env
-from nav.lidar import make_lidar_cfg, read_scan, read_scan_full, sector_min
+from nav.lidar import make_lidar_cfg, read_scan, read_scan_full, read_scan_3d, sector_min
 from nav.avoid import make_avoider
 from nav.grid_map import GridMap
 from nav.planner import Planner
@@ -109,7 +109,7 @@ def resolve_ckpt_dir(exp_name, ckpt_dir=None):
 def run_patrol(exp_name, ckpt, seed=-1, avoid=True, waypoints="square", laps=1.0, max_time=60.0, out=None,
                camera=None, res=(1280, 720), fps=50, collision_dist=0.25, lidar_warmup=5, avoid_kwargs=None,
                lidar_min_range=0.0, verbose=True, mcap=None, avoid_version="v2", camera_only=False, v3_kwargs=None,
-               ckpt_dir=None):
+               ckpt_dir=None, lidar="2d"):
     """1 エピソードの巡回を実行して計測値の dict を返す(gs.init() 済みであること)。
 
     out=None なら録画しない(camera_cfg=None、T04 の評価用)。
@@ -148,13 +148,18 @@ def run_patrol(exp_name, ckpt, seed=-1, avoid=True, waypoints="square", laps=1.0
         camera_cfg = dict(res=tuple(res), pos=(1.0, -3.2, 3.0), lookat=(1.0, 1.0, 0.3), fov=50, GUI=False)
     else:
         camera_cfg = dict(res=tuple(res), pos=(4.0, -4.0, 3.0), lookat=(1.0, 1.0, 0.3), fov=45, GUI=False)
-    lidar_cfg = make_lidar_cfg(min_range=lidar_min_range)
+    lidar_cfg = make_lidar_cfg(mode=lidar, min_range=lidar_min_range)
 
     env = Go2Env(num_envs=1, env_cfg=env_cfg, obs_cfg=obs_cfg, reward_cfg=reward_cfg,
                  command_cfg=command_cfg, show_viewer=False, camera_cfg=camera_cfg,
                  lidar_cfg=lidar_cfg, obstacles=obstacles)
     max_range = lidar_cfg["max_range"]
     cam = env.cam if out is not None else None     # camera_only のときは env.cam はあるが録画しない
+    # 障害物エンティティの種類(spec の順に展開。table は 天板 + 脚 4 本)。接触した相手の種類の記録用(T12)
+    obstacle_types = []
+    for o in scene_meta["obstacles"]:
+        obstacle_types += ["table_top", "table_leg", "table_leg", "table_leg", "table_leg"] if o["type"] == "table" else [o["type"]]
+    assert len(obstacle_types) == len(env.obstacles)
 
     runner = OnPolicyRunner(env, train_cfg, log_dir, device=gs.device)
     runner.load(os.path.join(log_dir, f"model_{ckpt}.pt"))
@@ -192,6 +197,9 @@ def run_patrol(exp_name, ckpt, seed=-1, avoid=True, waypoints="square", laps=1.0
     scan = None
     n_collision, first_collision_t = 0, None
     n_contact, first_contact_t = 0, None          # 物理接触(robot と障害物の contact)。衝突の主指標(T04)
+    first_contact_type, contact_types = None, set()
+    pts3d, cls3d = None, None
+    prev_lin_vel = None
     n_raw_hit_steps, n_raw_hits, n_hits_after = 0, 0, 0   # 地面除去の検証用(raw / 除去後のヒット数)
     min_lidar = max_range
     with torch.no_grad():
@@ -233,7 +241,10 @@ def run_patrol(exp_name, ckpt, seed=-1, avoid=True, waypoints="square", laps=1.0
             min_dist, collision, raw_hits, hits = max_range, 0, 0, 0
             raw, pts = None, None
             if n_steps >= lidar_warmup:
-                scan, raw, pts = read_scan_full(env)
+                if lidar == "3d":
+                    scan, pts, raw, pts3d, cls3d, _ = read_scan_3d(env)     # 胴体帯だけを 72 本に投影(T12)
+                else:
+                    scan, raw, pts = read_scan_full(env)
                 if v3:
                     bp = env.robot.get_pos()[0].cpu().numpy()
                     byaw = float(quat_to_xyz(env.robot.get_quat(), rpy=True, degrees=False)[0, 2])
@@ -252,11 +263,14 @@ def run_patrol(exp_name, ckpt, seed=-1, avoid=True, waypoints="square", laps=1.0
                         if verbose:
                             print(f"[go2_patrol] collision (lidar) at t={first_collision_t:.1f}s min_dist={min_dist:.2f}")
             contact = 0
-            for obs in env.obstacles:
+            for obs, otype in zip(env.obstacles, obstacle_types):
                 c = env.robot.get_contacts(with_entity=obs)
                 n_c = int(c["valid_mask"].sum()) if "valid_mask" in c else len(c["position"])
                 if n_c > 0:
                     contact = 1
+                    contact_types.add(otype)
+                    if first_contact_type is None:
+                        first_contact_type = otype
                     break
             if contact:
                 n_contact += 1
@@ -278,6 +292,15 @@ def run_patrol(exp_name, ckpt, seed=-1, avoid=True, waypoints="square", laps=1.0
                                           contact=contact))
                 if v3 and n_steps % 50 == 0:
                     mcap_logger.log_grid(n_steps * env.dt, gmap, planner.path_xy)
+                if lidar == "3d" and pts3d is not None:
+                    mcap_logger.log_points3d(n_steps * env.dt, pts3d, cls3d)
+                    # IMU 相当: 胴体角速度(観測)と線加速度(胴体フレーム速度の差分 + 重力)。提出後の SLAM 実験用の素材
+                    lv = env.base_lin_vel[0].cpu().numpy().astype(np.float64)
+                    av = env.base_ang_vel[0].cpu().numpy().astype(np.float64)
+                    pg = env.projected_gravity[0].cpu().numpy().astype(np.float64)
+                    acc = (lv - prev_lin_vel) / env.dt - 9.81 * pg if prev_lin_vel is not None else -9.81 * pg
+                    prev_lin_vel = lv
+                    mcap_logger.log_imu(n_steps * env.dt, av, acc)
             n_steps += 1
             if bool(dones[0]):
                 # 環境のエピソード上限によるリセット(time_outs)と転倒(pitch/roll 超過)を区別する
@@ -310,7 +333,8 @@ def run_patrol(exp_name, ckpt, seed=-1, avoid=True, waypoints="square", laps=1.0
         if verbose:
             print(f"[go2_patrol] v3: plans={planner.n_plans} no-path={planner.n_fail} retry(inflate 0.25)={planner.n_retry} "
                   f"local-goal steps={n_local} occupied cells={v3_stats['occupied_cells']}")
-    return dict(v3_stats=v3_stats, gmap=gmap, reached=reached, max_laps_idx=max_laps_idx, end_reason=end_reason, sim_s=n_steps * env.dt,
+    return dict(first_contact_type=first_contact_type, contact_types=sorted(contact_types), lidar=lidar,
+                fell=end_reason == "fell", v3_stats=v3_stats, gmap=gmap, reached=reached, max_laps_idx=max_laps_idx, end_reason=end_reason, sim_s=n_steps * env.dt,
                 wall_s=elapsed, n_steps=n_steps, n_collision=n_collision, first_collision_t=first_collision_t,
                 n_contact=n_contact, first_contact_t=first_contact_t, n_raw_hit_steps=n_raw_hit_steps,
                 n_raw_hits=n_raw_hits, n_hits_after=n_hits_after, path_length=path_length, min_lidar=min_lidar,
@@ -361,6 +385,8 @@ def main():
     parser.add_argument("--t-commit", type=float, default=2.0, help="v2: 回避側へのコミット時間 [s]")
     parser.add_argument("--t-clear", type=float, default=1.0, help="v2: 正面が空いた後に直進する時間 [s]")
     parser.add_argument("--lidar-min-range", type=float, default=0.0)
+    parser.add_argument("--lidar", choices=["2d", "3d"], default="2d",
+                        help="2d = 水平 72 本(既定)、3d = 72 × 16 層を胴体の高さ帯で 72 本に投影(T12)")
     parser.add_argument("--summary-csv", type=str, default="results/t03_metrics.csv",
                         help="実行ごとの要約行を追記する CSV(空文字で無効)")
     args = parser.parse_args()
@@ -375,7 +401,7 @@ def main():
                    avoid_kwargs=avoid_kwargs, lidar_min_range=args.lidar_min_range, mcap=args.mcap,
                    avoid_version=args.avoid_version, camera_only=args.camera_only,
                    v3_kwargs=dict(replan_s=args.replan_s, lookahead=args.lookahead, inflate=args.inflate),
-                   ckpt_dir=args.ckpt_dir)
+                   ckpt_dir=args.ckpt_dir, lidar=args.lidar)
     if r.get("v3_stats"):
         base = os.path.splitext(args.out)[0]
         if r["v3_stats"]["last_path"]:
@@ -390,7 +416,7 @@ def main():
           f"sim {r['sim_s']:.1f}s, wall {r['wall_s']:.1f}s, waypoints reached {r['reached']}/{r['max_laps_idx']}, "
           f"end reason: {r['end_reason']}")
     print(f"[go2_patrol] collision steps={r['n_collision']} first={r['first_collision_t']}; "
-          f"contact steps={r['n_contact']} first={r['first_contact_t']}; path length={r['path_length']:.2f} m; "
+          f"contact steps={r['n_contact']} first={r['first_contact_t']} type={r['first_contact_type']}; path length={r['path_length']:.2f} m; "
           f"lidar: steps with raw hits={r['n_raw_hit_steps']}/{r['lidar_steps']}, raw hits total={r['n_raw_hits']}, "
           f"hits after ground removal={r['n_hits_after']}")
     if args.summary_csv:

@@ -1,0 +1,53 @@
+{
+ "seed": 118,
+ "profile": "mixed",
+ "n_target": 3,
+ "n_placed": 3,
+ "area": [
+  -0.5,
+  2.5
+ ],
+ "wp_clear": 0.5,
+ "start_clear": 1.0,
+ "gap": 1.2,
+ "on_path_types": [
+  "lowbox",
+  "table"
+ ],
+ "scene_tries": 6,
+ "obstacles": [
+  {
+   "type": "lowbox",
+   "size": [
+    0.35148071891671373,
+    0.35148071891671373,
+    0.15
+   ],
+   "pos": [
+    2.132656559907905,
+    0.7501503231868561
+   ]
+  },
+  {
+   "type": "table",
+   "top_size": 0.7355416731326226,
+   "top_z_bottom": 0.316,
+   "thickness": 0.04,
+   "leg_radius": 0.02,
+   "leg_inset": 0.1,
+   "pos": [
+    1.0306598099422182,
+    2.3979384494144624
+   ]
+  },
+  {
+   "type": "cylinder",
+   "radius": 0.16470627903093263,
+   "height": 0.7,
+   "pos": [
+    -0.48131625463147354,
+    1.0854686320121374
+   ]
+  }
+ ]
+}

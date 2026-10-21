@@ -55,6 +55,13 @@ class McapLogger:
         self.path_ch = PosesInFrameChannel("/trajectory")
         self.scene_ch = SceneUpdateChannel("/obstacles")
         self.grid_ch = GridChannel("/map")                 # v3 の占有格子(1 s ごと)
+        self.pc3d_ch = PointCloudChannel("/lidar/points3d")  # T12: 3D 点群(高さ分類つき)
+        self.imu_ch = Channel("/imu", message_encoding="json", schema=Schema(
+            name="Imu", encoding="jsonschema",
+            data=json.dumps({"type": "object", "properties": {
+                "frame_id": {"type": "string"},
+                "angular_velocity": {"type": "object", "properties": {k: {"type": "number"} for k in "xyz"}},
+                "linear_acceleration": {"type": "object", "properties": {k: {"type": "number"} for k in "xyz"}}}}).encode()))
         self.plan_ch = PosesInFrameChannel("/plan")        # v3 の A* 経路
         schema = Schema(name="NavState", encoding="jsonschema",
                         data=json.dumps({"type": "object",
@@ -77,11 +84,21 @@ class McapLogger:
         ents = []
         for i, o in enumerate(obstacles or []):
             x, y = o["pos"]
-            if o["type"] == "box":
+            if o["type"] in ("box", "lowbox"):
                 sx, sy, sz = o["size"]
                 ents.append(M.SceneEntity(frame_id="world", id=f"obs{i}", timestamp=ts(0), cubes=[M.CubePrimitive(
                     pose=M.Pose(position=M.Vector3(x=x, y=y, z=sz / 2), orientation=_IDENTITY_Q),
                     size=M.Vector3(x=sx, y=sy, z=sz), color=gray)]))
+            elif o["type"] == "table":
+                st, zb, th, ins = o["top_size"], o["top_z_bottom"], o["thickness"], o.get("leg_inset", 0.1)
+                ents.append(M.SceneEntity(frame_id="world", id=f"obs{i}", timestamp=ts(0),
+                    cubes=[M.CubePrimitive(pose=M.Pose(position=M.Vector3(x=x, y=y, z=zb + th / 2), orientation=_IDENTITY_Q),
+                                           size=M.Vector3(x=st, y=st, z=th), color=gray)],
+                    cylinders=[M.CylinderPrimitive(pose=M.Pose(position=M.Vector3(x=x + sx * ins, y=y + sy * ins, z=zb / 2),
+                                                               orientation=_IDENTITY_Q),
+                                                   size=M.Vector3(x=2 * o["leg_radius"], y=2 * o["leg_radius"], z=zb),
+                                                   bottom_scale=1.0, top_scale=1.0, color=gray)
+                               for sx in (-1, 1) for sy in (-1, 1)]))
             else:
                 r, h = o["radius"], o["height"]
                 ents.append(M.SceneEntity(frame_id="world", id=f"obs{i}", timestamp=ts(0), cylinders=[M.CylinderPrimitive(
@@ -142,6 +159,29 @@ class McapLogger:
             self.plan_ch.log(M.PosesInFrame(timestamp=ts(t), frame_id="world", poses=[
                 M.Pose(position=M.Vector3(x=float(x), y=float(y), z=0.05), orientation=_IDENTITY_Q) for x, y in path_xy]),
                 log_time=ns)
+
+    def log_points3d(self, t, pts_world, cls):
+        """3D 点群(world)。fields: x, y, z (float32) + cls (uint8: 0 地面 / 1 胴体帯 / 2 頭上 / 3 ヒットなし / 4 自機)。ヒットなしは除く"""
+        m = cls != 3
+        p = np.asarray(pts_world, dtype=np.float32)[m]
+        c = np.asarray(cls, dtype=np.uint8)[m]
+        buf = np.zeros(len(p), dtype=[("x", "<f4"), ("y", "<f4"), ("z", "<f4"), ("cls", "u1")])
+        buf["x"], buf["y"], buf["z"], buf["cls"] = p[:, 0], p[:, 1], p[:, 2], c
+        self.pc3d_ch.log(M.PointCloud(
+            timestamp=ts(t), frame_id="world",
+            pose=M.Pose(position=M.Vector3(x=0.0, y=0.0, z=0.0), orientation=_IDENTITY_Q),
+            point_stride=13,
+            fields=[M.PackedElementField(name="x", offset=0, type=M.PackedElementFieldNumericType.Float32),
+                    M.PackedElementField(name="y", offset=4, type=M.PackedElementFieldNumericType.Float32),
+                    M.PackedElementField(name="z", offset=8, type=M.PackedElementFieldNumericType.Float32),
+                    M.PackedElementField(name="cls", offset=12, type=M.PackedElementFieldNumericType.Uint8)],
+            data=buf.tobytes()), log_time=int(t * 1e9))
+
+    def log_imu(self, t, ang_vel, lin_acc):
+        """IMU 相当(胴体フレーム)。角速度 [rad/s]、線加速度 [m/s^2](重力込み)"""
+        self.imu_ch.log({"frame_id": "base",
+                         "angular_velocity": {k: float(v) for k, v in zip("xyz", ang_vel)},
+                         "linear_acceleration": {k: float(v) for k, v in zip("xyz", lin_acc)}}, log_time=int(t * 1e9))
 
     def stats(self):
         return dict(steps=self.n_steps, points=self.n_points, total_s=self.t_spent,

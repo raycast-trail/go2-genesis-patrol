@@ -54,6 +54,15 @@ def main():
             if o["type"] == "box":
                 sx, sy = o["size"][0], o["size"][1]
                 ax.add_patch(plt.Rectangle((x - sx / 2, y - sy / 2), sx, sy, fc="dimgray", ec="k", alpha=0.8))
+            elif o["type"] == "lowbox":           # 低い箱 = 薄い灰(T12)
+                sx, sy = o["size"][0], o["size"][1]
+                ax.add_patch(plt.Rectangle((x - sx / 2, y - sy / 2), sx, sy, fc="lightgray", ec="k", alpha=0.9, hatch="//"))
+            elif o["type"] == "table":            # テーブル = 天板の輪郭 + 脚(T12)
+                st, ins = o["top_size"], o.get("leg_inset", 0.1)
+                ax.add_patch(plt.Rectangle((x - st / 2, y - st / 2), st, st, fill=False, ec="k", lw=1.5, ls="--"))
+                for sx_ in (-1, 1):
+                    for sy_ in (-1, 1):
+                        ax.add_patch(plt.Circle((x + sx_ * ins, y + sy_ * ins), o["leg_radius"], fc="k", ec="k"))
             else:
                 ax.add_patch(plt.Circle((x, y), o["radius"], fc="dimgray", ec="k", alpha=0.8))
     colors = ["tab:blue", "tab:orange", "tab:green", "tab:red"]

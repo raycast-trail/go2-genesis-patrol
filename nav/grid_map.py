@@ -115,9 +115,12 @@ class GridMap:
         if obstacles:
             for o in obstacles:
                 x, y = o["pos"]
-                if o["type"] == "box":
+                if o["type"] in ("box", "lowbox"):
                     sx, sy = o["size"][0], o["size"][1]
                     ax.add_patch(plt.Rectangle((x - sx / 2, y - sy / 2), sx, sy, fill=False, ec="red", lw=1.0, ls="--"))
+                elif o["type"] == "table":
+                    st = o["top_size"]
+                    ax.add_patch(plt.Rectangle((x - st / 2, y - st / 2), st, st, fill=False, ec="red", lw=1.0, ls=":"))
                 else:
                     ax.add_patch(plt.Circle((x, y), o["radius"], fill=False, ec="red", lw=1.0, ls="--"))
         if waypoints is not None:

@@ -1,0 +1,14 @@
+phase,quantity,value
+standing,base_z,0.2881376
+standing,sensor_z (base z + 0.15),0.43813762
+standing,robot_aabb_max_z,0.3462
+standing,robot_aabb_min_z,-0.0007
+standing,base_link_aabb_max_z,0.3462
+standing,foot_bottom_z (min calf aabb z),-0.0007
+standing,highest_link (base),0.3462
+walking,swing_foot_max_z (max over time of calf aabb min z),0.0223
+walking,robot_aabb_max_z_max,0.3895
+walking,base_z_min,0.3061
+walking,base_z_max,0.3183
+walking,abs_pitch_max_deg,4.2463
+walking,steps,700
