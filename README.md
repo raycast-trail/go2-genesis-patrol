@@ -1,5 +1,18 @@
 # go2-genesis-patrol
 
+![hero](docs/media/hero.gif)
+
+**Unitree Go2 patrol in the Genesis simulator — RL locomotion + LiDAR navigation, evaluated on randomized scenes.**
+
+- A walking policy trained with PPO (4,096 parallel envs, 9 min on an M1 Max) follows velocity commands; a deterministic navigation stack on top of it patrols a square route.
+- Navigation was improved step by step — reactive avoidance (v1) → commit phase (v2) → occupancy grid + A* (v3) — raising patrol success from 9% to 100% with zero contacts over 45 randomized scenes.
+- A 3D pseudo-LiDAR projected onto the body-height band detects low boxes and table tops that a 2D scan misses (success 3% → 100% over 30 scenes).
+- Everything runs on a single Mac (Metal / CPU); logs export to MCAP for Foxglove.
+
+📄 Report (Japanese): [docs/report/report.pdf](docs/report/report.pdf) · 🎬 Full video: (提出後に URL を記載)
+
+---
+
 Unitree Go2 の歩行方策を Genesis 上で強化学習し、その上に疑似 LiDAR を使った巡回・障害物回避のナビゲーション層(反応的回避 v1 / v2、占有格子 + A* の大域計画 v3)を載せて、乱数配置の 45 シーンで定量評価したプロジェクト(Physical AI 2026 応用編1 最終課題)。実機 Go2 の「自己位置 → 地図・計画 → 速度指令 → 歩行」と同じ 3 層構造をシミュレーションで再現し、回避なし → 反応的回避 → 大域計画の順に成功率 9% → 91% → 100%、接触率 91% → 0% になることを対応ありの検定つきで示した。
 
 - 提出動画: `(提出後に URL を記載)`
@@ -16,6 +29,10 @@ Unitree Go2 の歩行方策を Genesis 上で強化学習し、その上に疑�
 | v1 反応的回避 | 41/45 = 91% [79–96%] | 0% | 31.6 | 1.00 |
 | v2 コミット区間つき | 43/45 = 96% [85–99%] | 0% | 31.7 | 0.81 |
 | **v3 占有格子 + A\*** | **45/45 = 100%** [92–100%] | **0%** | **24.2** | **1.05** |
+
+![v1 v2 v3](docs/media/v1_v2_v3_seed28.gif)
+
+同じ配置(seed 28)の v1 / v2 / v3(2 倍速、v3 の完走 + 1 s まで)。v1 は Box の前で振動、v2 は遠回り、v3 は計画経路で脇を抜ける。
 
 ![summary](results/eval_50/summary.png)
 
@@ -118,6 +135,7 @@ python eval/summarize.py --compare-lidar results/eval_3d/episodes.csv --scenes 1
 # 6. 提出動画の再生成(図 → 構成図 → カード → 結合。素材は videos/raw/ に同梱。3D のショットは videos/raw/t12_*、Foxglove 3D のショットは videos/raw/foxglove_3d_seed103.mp4 があれば入る)
 python scripts/make_figs.py && python scripts/make_arch.py && python scripts/make_cards.py && python scripts/check_margins.py
 python scripts/make_video.py --v1-seed28-start 14 --v2-seed28-start 6 --v3-seed28-start 9.7
+python scripts/make_gifs.py      # README の GIF 2 本とソーシャルプレビュー画像(docs/media/)
 ```
 
 ## リポジトリ構成
@@ -133,7 +151,7 @@ python scripts/make_video.py --v1-seed28-start 14 --v2-seed28-start 6 --v3-seed2
 | `results/` | 評価 CSV・図(`eval_50/` が 45 配置 × 4 条件、`eval_3d/` が混合 30 配置 × 2D / 3D、`eval/` が 15 配置 × 2 方策 × 2 条件)、シーン JSON(`scenes/`)、MCAP(`mcap/`) |
 | `videos/` | 代表動画、`raw/`(動画素材)、`final/`(提出動画) |
 | `figs/`, `scripts/` | 動画用の図・カードと、その生成・結合スクリプト |
-| `docs/` | 設計書、実現可能性調査、Foxglove レイアウト、`report/`(レポート PDF・HTML・図) |
+| `docs/` | 設計書、実現可能性調査、Foxglove レイアウト、`report/`(レポート PDF・HTML・図)、`media/`(README の GIF・ソーシャルプレビュー) |
 | `tasks/`, `reports/` | 作業タスクの仕様と報告(開発ログ) |
 
 ## 既知の制約・限界
@@ -163,6 +181,7 @@ python scripts/make_video.py --v1-seed28-start 14 --v2-seed28-start 6 --v3-seed2
 | T12 | 3D 疑似 LiDAR と低い箱・テーブル(2D では見えない障害物) | `reports/12_lidar3d.md` |
 | T13 | 3D の層を密にする(天板の縁)、動画 v3、README 反映 | `reports/13_lidar3d_dense_integrate.md` |
 | T14 | Foxglove 3D 点群の画面収録を動画に追加(動画 v4) | `reports/14_foxglove3d_video.md` |
+| T15 | README の冒頭 GIF・英語要約・比較 GIF、ソーシャルプレビュー | `reports/15_readme_showcase.md` |
 
 ## ライセンス・使用 OSS
 
