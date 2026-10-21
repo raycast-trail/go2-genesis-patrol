@@ -24,7 +24,7 @@ Unitree Go2 の歩行方策を Genesis 上で強化学習し、その上に疑�
 - 既定例題の方策(前進 0.5 m/s のみ)は旋回できず、全条件で成功 0%(`results/eval/`、15 配置)
 - 転倒は全エピソードで 0
 
-### 3D LiDAR: 2D では見えない障害物(T12 / T13)
+### 3D LiDAR: 2D では見えない障害物(T12 / T13 / T14)
 
 センサ面(z ≈ 0.44 m)より低い **箱(高さ 0.15 m)** と **テーブルの天板(0.32〜0.36 m)** は水平 2D スキャンに映らない。`--lidar 3d` では 72 × 16 層(垂直 ±30°、4° 刻み)の点群を胴体の高さ帯(0.05〜0.49 m)で切って 72 本に投影し、ナビ層はそのまま使う(実機の voxel layer と同じ処理)。混合配置 30 シーン(seed 100〜129、低い箱 + テーブル + 高い障害物、少なくとも 1 つが経路上)、v3。数値は `results/eval_3d/summary.md`。
 
@@ -40,6 +40,9 @@ Unitree Go2 の歩行方策を Genesis 上で強化学習し、その上に疑�
 - 2D → 3D(16 層): 成功・接触とも McNemar p < 0.0001。2D の失敗は低い箱を踏む(7 件、うち 6 件転倒)か天板に胴体が当たる(23 件)
 - 層を密にした試作(30 層)は天板の縁の検出誤差を 0.37 m(90 パーセンタイル)から 0.03 m に下げたが、テーブルの脇で反応的回避の下層が減速する時間が増えて所要時間が伸びた(1 配置が時間切れ、接触なし)ので既定にしていない。±12° だけ(25 層)にすると近くの低い箱が見えなくなり踏む。詳細は `reports/13_lidar3d_dense_integrate.md`
 - 3D の追加コストは +0.5〜0.8 ms/step(CPU)
+- Foxglove での 3D 点群の表示(`/lidar/points` を z で色分け、減衰 60 s。`/lidar/points3d` で毎ステップの全点群)。seed 103、低い箱の上面・テーブルの天板・円柱の側面に点が積み上がる(T14)
+
+![foxglove3d](results/t14_foxglove3d_seed103.png)
 
 ## 構成
 
@@ -105,8 +108,14 @@ python eval/summarize.py --compare-lidar results/eval_3d/episodes.csv --scenes 1
 # 5. Foxglove で 3D 表示(LiDAR 点群・軌跡・障害物・TF・指令。v3 は /map と /plan も)
 #    Foxglove アプリ: Open local file → results/mcap/t06_seed10.mcap、Layout → Import → docs/foxglove_layout.json
 #    (3D パネルの表示フレームを world にする。Plot パネルは /nav/state.vx, .yaw_rate, .d_front)
+#    3D 点群(T12 以降の results/mcap/t12_3d_seed103.mcap など)の表示設定:
+#      表示フレーム world、フォローモード 固定
+#      /lidar/points   : カラーマップ Turbo、カラーフィールド z、最小 0 / 最大 0.5、減衰 60 s
+#      /lidar/points3d : 減衰 0、ポイントサイズ 2
+#      /map            : フラット色・半透明
+#      変換: ラベル オフ、軸のスケール 0.6
 
-# 6. 提出動画の再生成(図 → 構成図 → カード → 結合。素材は videos/raw/ に同梱。3D のショットは videos/raw/t12_* があれば入る)
+# 6. 提出動画の再生成(図 → 構成図 → カード → 結合。素材は videos/raw/ に同梱。3D のショットは videos/raw/t12_*、Foxglove 3D のショットは videos/raw/foxglove_3d_seed103.mp4 があれば入る)
 python scripts/make_figs.py && python scripts/make_arch.py && python scripts/make_cards.py && python scripts/check_margins.py
 python scripts/make_video.py --v1-seed28-start 14 --v2-seed28-start 6 --v3-seed28-start 9.7
 ```
@@ -153,6 +162,7 @@ python scripts/make_video.py --v1-seed28-start 14 --v2-seed28-start 6 --v3-seed2
 | T11 | 構成図の作り直し、動画 v2.1、README、クリーンクローン検証 | `reports/11_arch_readme.md` |
 | T12 | 3D 疑似 LiDAR と低い箱・テーブル(2D では見えない障害物) | `reports/12_lidar3d.md` |
 | T13 | 3D の層を密にする(天板の縁)、動画 v3、README 反映 | `reports/13_lidar3d_dense_integrate.md` |
+| T14 | Foxglove 3D 点群の画面収録を動画に追加(動画 v4) | `reports/14_foxglove3d_video.md` |
 
 ## ライセンス・使用 OSS
 

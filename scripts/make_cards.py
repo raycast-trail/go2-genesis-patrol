@@ -144,6 +144,7 @@ banner("B10d", "seed 28 の軌跡: v1 は振動、v2 は遠回り、v3 は計画
 banner("B11", "45 配置 × 4 条件の集計(Wilson 95% CI、McNemar)")
 banner("B12c", "2D: 低い箱が見えず踏んで転倒(seed 103、等速)")
 banner("B12d", "3D: 低い箱とテーブルを地図に入れて迂回、完走(seed 103)", speed=True)
+banner("B12f", "Foxglove: 3D 点群(高さで色分け)が低い箱・天板・円柱をなぞる(seed 103)", speed=True)
 
 # 左右 2 分割用(640×720)
 half_card("C1h", "1. 歩行方策を強化学習で獲得",

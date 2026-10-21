@@ -1,5 +1,5 @@
 """
-scripts/check_margins.py — figs/cards/*.png の左右の余白を検査する(T10)。
+scripts/check_margins.py — figs/cards/*.png の左右の余白を検査する(T10。T14 の帯 B12f も glob で対象)。
 背景色(カード: BG、帯: 半透明の帯色)と左のアクセント帯(x < 20)を除いた描画ピクセルの x の最小・最大から、
 右端の余白 = 幅 − max_x − 1 が 100 px 以上、左端の描画が x ≤ 85(文字は x = 80 から)であることを全ファイルで確認して表にする。\n--extra の図(既定 figs/arch.png)は左右とも余白 ≥ 100 px を要求する。
 

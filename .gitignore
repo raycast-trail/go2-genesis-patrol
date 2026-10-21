@@ -10,6 +10,8 @@ __pycache__/
 !videos/*.mp4
 !videos/raw/*.mp4
 !videos/final/*.mp4
+# 画面収録の原本(整形した mp4 のみコミット)
+*.mov
 # 一時ファイル
 *_log.csv
 !results/**/*.csv
