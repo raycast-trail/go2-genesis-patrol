@@ -119,6 +119,9 @@ def run_patrol(exp_name, ckpt, seed=-1, avoid=True, waypoints="square", laps=1.0
         camera_cfg = None
     elif camera_mode == "overhead":
         camera_cfg = dict(res=tuple(res), pos=(1.0, -4.0, 4.0), lookat=(1.0, 1.0, 0.0), fov=50, GUI=False)
+    elif camera_mode == "overhead-close":
+        # 提出動画用の寄せた俯瞰(T08)
+        camera_cfg = dict(res=tuple(res), pos=(1.0, -3.2, 3.0), lookat=(1.0, 1.0, 0.3), fov=50, GUI=False)
     else:
         camera_cfg = dict(res=tuple(res), pos=(4.0, -4.0, 3.0), lookat=(1.0, 1.0, 0.3), fov=45, GUI=False)
     lidar_cfg = make_lidar_cfg(min_range=lidar_min_range)
@@ -283,8 +286,8 @@ def main():
     parser.add_argument("--seed", type=int, default=-1, help="障害物シーンの seed(eval/scenes.py)。-1 で障害物なし")
     parser.add_argument("--avoid", action=argparse.BooleanOptionalAction, default=True,
                         help="LiDAR による回避則(nav/avoid.py)を使う。--no-avoid で経路追従のみ")
-    parser.add_argument("--camera", choices=["follow", "overhead"], default=None,
-                        help="追従カメラ / 俯瞰カメラ(既定: 障害物ありなら overhead、なしなら follow)")
+    parser.add_argument("--camera", choices=["follow", "overhead", "overhead-close"], default=None,
+                        help="追従 / 俯瞰 / 寄せた俯瞰(既定: 障害物ありなら overhead、なしなら follow)")
     parser.add_argument("--collision-dist", type=float, default=0.25, help="LiDAR 最小距離がこれ未満ならニアミス(LiDAR 衝突)")
     parser.add_argument("--lidar-warmup", type=int, default=5, help="着地までの間 LiDAR を使わないステップ数")
     parser.add_argument("--d-slow", type=float, default=1.0)

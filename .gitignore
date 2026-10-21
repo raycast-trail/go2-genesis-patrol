@@ -7,6 +7,8 @@ __pycache__/
 # 動画は代表例のみ videos/ に置く。それ以外は除外
 *.mp4
 !videos/*.mp4
+!videos/raw/*.mp4
+!videos/final/*.mp4
 # 一時ファイル
 *_log.csv
 !results/**/*.csv
