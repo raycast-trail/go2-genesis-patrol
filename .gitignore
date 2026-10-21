@@ -4,6 +4,7 @@ __pycache__/
 *.pyc
 .venv/
 .DS_Store
+.vscode/
 # 動画は代表例のみ videos/ に置く。それ以外は除外
 *.mp4
 !videos/*.mp4

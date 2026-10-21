@@ -48,7 +48,7 @@
 </ul>
 
 <h2>3. システム構成</h2>
-<figure><img src="figs/arch_crop.png" style="max-width:80%"><figcaption>図 1: システム構成(v1/v2)。学習するのは歩行方策のみ。ナビゲーション層(経路追従・回避則)は決定的で、入力は LiDAR のセクタ距離と真の姿勢。v3 では LiDAR → 占有格子地図 → A* → ローカル目標 の経路が経路追従の前段に入り、回避則は下層の安全停止として残る(§8)。</figcaption></figure>
+<figure><img src="figs/arch_crop.png" style="max-width:84%"><figcaption>図 1: システム構成。学習するのは歩行方策のみ。ナビゲーション層は決定的で、入力は LiDAR のヒット点・セクタ距離と真の姿勢。v1/v2 は地図なしの反応的回避(赤)、v3 は占有格子 + A* の大域計画(緑)がローカル目標を経路追従に渡し、反応的回避は下層の安全停止として残る(§8)。</figcaption></figure>
 <table>
 <tr><th style="width:20%">層</th><th>実装</th><th style="width:30%">実機 Go2 との対応</th></tr>
 <tr><td>経路追従</td><td>4 つのウェイポイント(2 m 角)への P 制御。進行方向誤差 → ω<sub>z</sub>、距離 → v<sub>x</sub>。到達判定 0.3 m</td><td>Nav2 のローカル追従に相当</td></tr>

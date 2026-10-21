@@ -60,7 +60,9 @@ def main():
     gs.init(backend=gs.gpu if args.backend == "gpu" else gs.cpu, logging_level="warning")
     print(f"[go2_record] gs.backend={gs.backend}  gs.device={gs.device}")
 
-    log_dir = f"logs/{args.exp_name}"
+    # logs/<exp>(学習直後)が無ければ同梱の checkpoints/<exp> を使う
+    log_dir = next((d for d in [f"logs/{args.exp_name}", f"checkpoints/{args.exp_name}"]
+                    if os.path.exists(os.path.join(d, "cfgs.pkl"))), f"logs/{args.exp_name}")
     with open(f"{log_dir}/cfgs.pkl", "rb") as f:
         env_cfg, obs_cfg, reward_cfg, command_cfg, train_cfg = pickle.load(f)
     reward_cfg["reward_scales"] = {}

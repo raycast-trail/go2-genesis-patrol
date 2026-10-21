@@ -97,9 +97,19 @@ class WaypointFollower:
         return self.waypoints[self.idx]
 
 
+def resolve_ckpt_dir(exp_name, ckpt_dir=None):
+    """cfgs.pkl と model_*.pt のあるディレクトリ。指定が無ければ logs/<exp>(学習直後)→ checkpoints/<exp>(同梱)の順に探す"""
+    cands = [ckpt_dir] if ckpt_dir else [f"logs/{exp_name}", f"checkpoints/{exp_name}"]
+    for d in cands:
+        if d and os.path.exists(os.path.join(d, "cfgs.pkl")):
+            return d
+    raise FileNotFoundError(f"cfgs.pkl not found in {cands} (train first, or use the bundled checkpoints/)")
+
+
 def run_patrol(exp_name, ckpt, seed=-1, avoid=True, waypoints="square", laps=1.0, max_time=60.0, out=None,
                camera=None, res=(1280, 720), fps=50, collision_dist=0.25, lidar_warmup=5, avoid_kwargs=None,
-               lidar_min_range=0.0, verbose=True, mcap=None, avoid_version="v2", camera_only=False, v3_kwargs=None):
+               lidar_min_range=0.0, verbose=True, mcap=None, avoid_version="v2", camera_only=False, v3_kwargs=None,
+               ckpt_dir=None):
     """1 エピソードの巡回を実行して計測値の dict を返す(gs.init() 済みであること)。
 
     out=None なら録画しない(camera_cfg=None、T04 の評価用)。
@@ -111,7 +121,7 @@ def run_patrol(exp_name, ckpt, seed=-1, avoid=True, waypoints="square", laps=1.0
             first_contact_t, n_raw_hit_steps, n_raw_hits, n_hits_after, path_length, min_lidar, n_placed, scene_meta,
             log(np.ndarray, 列は LOG_HEADER)
     """
-    log_dir = f"logs/{exp_name}"
+    log_dir = resolve_ckpt_dir(exp_name, ckpt_dir)
     with open(f"{log_dir}/cfgs.pkl", "rb") as f:
         env_cfg, obs_cfg, reward_cfg, command_cfg, train_cfg = pickle.load(f)
     reward_cfg["reward_scales"] = {}
@@ -318,6 +328,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-e", "--exp-name", type=str, default="go2-patrol")
     parser.add_argument("--ckpt", type=int, default=299)
+    parser.add_argument("--ckpt-dir", type=str, default=None,
+                        help="cfgs.pkl / model_*.pt のディレクトリ(既定: logs/<exp> → 無ければ checkpoints/<exp>)")
     parser.add_argument("--out", type=str, default="go2_patrol.mp4")
     parser.add_argument("--no-video", action="store_true", help="録画しない(camera なし。評価用、速い)")
     parser.add_argument("--mcap", type=str, default=None, help="指定時のみ MCAP(Foxglove 用)を書く。例: results/mcap/run.mcap")
@@ -362,7 +374,8 @@ def main():
                    fps=args.fps, collision_dist=args.collision_dist, lidar_warmup=args.lidar_warmup,
                    avoid_kwargs=avoid_kwargs, lidar_min_range=args.lidar_min_range, mcap=args.mcap,
                    avoid_version=args.avoid_version, camera_only=args.camera_only,
-                   v3_kwargs=dict(replan_s=args.replan_s, lookahead=args.lookahead, inflate=args.inflate))
+                   v3_kwargs=dict(replan_s=args.replan_s, lookahead=args.lookahead, inflate=args.inflate),
+                   ckpt_dir=args.ckpt_dir)
     if r.get("v3_stats"):
         base = os.path.splitext(args.out)[0]
         if r["v3_stats"]["last_path"]:

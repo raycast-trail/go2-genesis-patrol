@@ -1,7 +1,7 @@
 """
 scripts/make_figs.py — 提出動画用の図(figs/*.png、1280×720 に収まるようにパディング)。
 
-  figs/arch.png          構成図(LiDAR → 回廊判定 → 回避則 → 速度指令 → RL 方策 → Genesis)
+  figs/arch.png          構成図(scripts/make_arch.py を呼ぶ)
   figs/train_curve.png   logs/go2-patrol の tfevents から rew_tracking_lin_vel / rew_tracking_ang_vel
   figs/result_50.png     results/eval_50/episodes.csv から成功率・接触率・所要時間(文字を大きく再描画)
   figs/traj_compare.png  results/t01_square_traj_compare.png をパディング
@@ -12,6 +12,7 @@ scripts/make_figs.py — 提出動画用の図(figs/*.png、1280×720 に収ま�
 import glob
 import math
 import os
+import sys
 
 import matplotlib
 matplotlib.use("Agg")
@@ -42,49 +43,10 @@ def pad_to_frame(src, dst, bg=(255, 255, 255), top=0):
 
 
 def arch():
-    fig, ax = plt.subplots(figsize=(12.8, 7.2), dpi=100)
-    ax.set_xlim(0, 12.8)
-    ax.set_ylim(0, 7.2)
-    ax.axis("off")
-    boxes = [
-        (0.4, 4.6, 2.3, 1.3, "ウェイポイント列\n(2 m 角の正方形)", "#e8eef8"),
-        (3.2, 4.6, 2.3, 1.3, "経路追従\n(P 制御)", "#e8eef8"),
-        (6.0, 4.6, 2.6, 1.3, "反応的回避 v1 / v2\n(v3 では下層)", "#fde9df"),
-        (9.3, 4.6, 3.1, 1.3, "速度指令 (vx, vy, ωz)\nvx 0–0.8, ωz ±0.8", "#e8eef8"),
-        (9.3, 2.3, 3.1, 1.3, "歩行方策 (RL / PPO)\n4096 env 並列学習", "#e4f5ec"),
-        (8.9, 0.3, 3.7, 1.3, "Genesis 物理シム\nGo2 + 障害物", "#f3f3f3"),
-        (3.6, 1.9, 4.0, 1.7, "疑似 2D LiDAR (Raycaster)\n72 本 / 5° / 5 m\n地面除去 → セクタ最小距離", "#fde9df"),
-        (0.2, 2.0, 3.1, 1.6, "占有格子 + A* (v3)\n0.05 m 格子、膨張 0.35 m\n1 s ごとに再計画", "#e4f5ec"),
-    ]
-    for x, y, w, h, text, fc in boxes:
-        ax.add_patch(FancyBboxPatch((x, y), w, h, boxstyle="round,pad=0.05,rounding_size=0.15", fc=fc, ec="#333333", lw=1.5))
-        ax.text(x + w / 2, y + h / 2, text, ha="center", va="center", fontsize=15 if "A*" not in text else 13, linespacing=1.4)
-
-    def arrow(p, q, text=None, color="#333333"):
-        ax.add_patch(FancyArrowPatch(p, q, arrowstyle="-|>", mutation_scale=22, lw=2, color=color))
-        if text:
-            ax.text((p[0] + q[0]) / 2, (p[1] + q[1]) / 2 + 0.18, text, ha="center", fontsize=12, color=color)
-    arrow((2.7, 5.25), (3.2, 5.25))
-    arrow((5.5, 5.25), (6.0, 5.25))
-    arrow((8.6, 5.25), (9.3, 5.25))
-    arrow((10.85, 4.6), (10.85, 3.6), "50 Hz")
-    arrow((10.85, 2.3), (10.85, 1.6))
-    ax.text(11.0, 1.85, "12 関節目標角", ha="left", fontsize=12)
-    arrow((8.9, 1.1), (7.6, 2.4), None, "#c0504d")
-    ax.text(8.55, 1.45, "レイキャスト", ha="left", fontsize=12, color="#c0504d")
-    arrow((5.8, 3.6), (7.0, 4.6), None, "#c0504d")
-    ax.text(5.95, 4.2, "セクタ距離", ha="left", fontsize=12, color="#c0504d")
-    arrow((3.6, 2.6), (3.3, 2.6), None, "#2e8b57")
-    ax.text(3.45, 2.2, "ヒット点", ha="center", fontsize=10, color="#2e8b57")
-    arrow((1.75, 3.6), (3.6, 4.6), None, "#2e8b57")
-    ax.text(1.3, 4.2, "ローカル目標 (0.8 m 先)", ha="left", fontsize=12, color="#2e8b57")
-    arrow((8.9, 0.75), (0.1, 0.75), "", "#777777")
-    ax.text(5.0, 0.95, "姿勢 (x, y, yaw)(真の姿勢、SLAM なし)", ha="center", fontsize=12, color="#777777")
-    arrow((0.1, 0.75), (0.1, 4.6), "", "#777777")
-    ax.text(0.55, 6.55, "構成: 実機 Go2 の「自己位置 → 地図・計画 → 速度指令 → 歩行」と同じ 3 層構造", fontsize=18, weight="bold")
-    ax.text(0.55, 6.15, "学習は歩行方策だけ。ナビ層は決定的・説明可能。v1/v2 は地図なしの反応的回避、v3 は占有格子 + A* の大域計画", fontsize=14, color="#444444")
-    fig.savefig("figs/arch.png", dpi=100, facecolor="white")
-    print("wrote figs/arch.png")
+    """構成図は scripts/make_arch.py(T11)で描く。ここからは呼ぶだけ"""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import make_arch
+    make_arch.main("figs/arch.png")
 
 
 def train_curve(half=False):
