@@ -61,7 +61,7 @@ def main():
     parser.add_argument("--backend", choices=["gpu", "cpu"], default="cpu")
     parser.add_argument("--waypoints", choices=list(WAYPOINT_SETS), default="square")
     parser.add_argument("--out", type=str, default="results/eval/episodes.csv")
-    parser.add_argument("--avoid-version", choices=["v1", "v2"], default="v2", help="回避則(nav/avoid.py)。T04 は v1")
+    parser.add_argument("--avoid-version", choices=["v1", "v2", "v3"], default="v2", help="回避則(nav/avoid.py)。T04 は v1、v3 = 地図 + A*(T09)")
     parser.add_argument("--t-commit", type=float, default=2.0)
     parser.add_argument("--t-clear", type=float, default=1.0)
     parser.add_argument("--camera-only", action="store_true", help="カメラを作るが録画しない(T07 の再現性対策)")

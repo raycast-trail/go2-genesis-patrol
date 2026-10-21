@@ -23,7 +23,7 @@ import numpy as np
 import foxglove
 from foxglove import Channel, Schema
 from foxglove import messages as M
-from foxglove.channels import (FrameTransformChannel, LaserScanChannel, PointCloudChannel, PosesInFrameChannel,
+from foxglove.channels import (FrameTransformChannel, GridChannel, LaserScanChannel, PointCloudChannel, PosesInFrameChannel,
                                SceneUpdateChannel)
 
 from nav.lidar import ANGLES_DEG
@@ -54,6 +54,8 @@ class McapLogger:
         self.pc_ch = PointCloudChannel("/lidar/points")
         self.path_ch = PosesInFrameChannel("/trajectory")
         self.scene_ch = SceneUpdateChannel("/obstacles")
+        self.grid_ch = GridChannel("/map")                 # v3 の占有格子(1 s ごと)
+        self.plan_ch = PosesInFrameChannel("/plan")        # v3 の A* 経路
         schema = Schema(name="NavState", encoding="jsonschema",
                         data=json.dumps({"type": "object",
                                          "properties": {k: {"type": "number"} for k in NAV_STATE_FIELDS}}).encode())
@@ -124,6 +126,22 @@ class McapLogger:
         self.nav_ch.log(state, log_time=ns)
         self.n_steps += 1
         self.t_spent += time.perf_counter() - t0
+
+    def log_grid(self, t, gmap, path_xy=None):
+        """占有格子を Foxglove Grid(uint8: 0 空き / 50 未知 / 100 占有)で書く。原点は格子の (xmin, ymin)"""
+        ns = int(t * 1e9)
+        u8 = gmap.occupancy_u8()                           # (ny, nx)、row = y
+        self.grid_ch.log(M.Grid(
+            timestamp=ts(t), frame_id="world",
+            pose=M.Pose(position=M.Vector3(x=gmap.xmin, y=gmap.ymin, z=0.0), orientation=_IDENTITY_Q),
+            column_count=gmap.nx, cell_size=M.Vector2(x=gmap.res, y=gmap.res),
+            row_stride=gmap.nx, cell_stride=1,
+            fields=[M.PackedElementField(name="occupancy", offset=0, type=M.PackedElementFieldNumericType.Uint8)],
+            data=u8.tobytes()), log_time=ns)
+        if path_xy:
+            self.plan_ch.log(M.PosesInFrame(timestamp=ts(t), frame_id="world", poses=[
+                M.Pose(position=M.Vector3(x=float(x), y=float(y), z=0.05), orientation=_IDENTITY_Q) for x, y in path_xy]),
+                log_time=ns)
 
     def stats(self):
         return dict(steps=self.n_steps, points=self.n_points, total_s=self.t_spent,

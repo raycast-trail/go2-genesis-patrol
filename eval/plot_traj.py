@@ -33,6 +33,7 @@ def main():
     parser.add_argument("--out", type=str, required=True)
     parser.add_argument("--title", type=str, default=None)
     parser.add_argument("--scene", type=str, default=None, help="results/scenes/seed_NN.json(障害物を描く)")
+    parser.add_argument("--plan", type=str, default=None, help="v3 の計画経路 CSV(x,y)を重ねる")
     args = parser.parse_args()
 
     labels = args.label or [os.path.basename(p).replace("_log.csv", "") for p in args.log]
@@ -66,6 +67,9 @@ def main():
             c = d[:, 7] > 0.5
             if c.any():
                 ax.plot(x[c], y[c], ".", color="red", ms=6, label=f"{lab}: collision ({int(c.sum())} steps)")
+    if args.plan and os.path.exists(args.plan):
+        pl = np.loadtxt(args.plan, delimiter=",", skiprows=1, ndmin=2)
+        ax.plot(pl[:, 0], pl[:, 1], color="tab:green", lw=2.0, ls="-", alpha=0.9, label="A* plan (last replan)")
     ax.set_aspect("equal")
     ax.set_xlabel("x [m]")
     ax.set_ylabel("y [m]")

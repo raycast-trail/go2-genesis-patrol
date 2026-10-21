@@ -42,6 +42,8 @@ from genesis.utils.geom import quat_to_xyz
 from go2_env import Go2Env
 from nav.lidar import make_lidar_cfg, read_scan, read_scan_full, sector_min
 from nav.avoid import make_avoider
+from nav.grid_map import GridMap
+from nav.planner import Planner
 from eval.scenes import make_obstacles, save_scene
 
 WAYPOINT_SETS = {
@@ -77,6 +79,12 @@ class WaypointFollower:
             target = self.waypoints[self.idx]
             delta = target - pos_xy
             dist = float(np.linalg.norm(delta))
+        return self.command_to(pos_xy, yaw_rad, target)
+
+    def command_to(self, pos_xy, yaw_rad, target):
+        """任意の目標点 target へ向かう (vx, vy, yaw_rate)。到達判定・添字の更新はしない(v3 のローカル目標用)"""
+        delta = np.asarray(target, dtype=np.float64) - pos_xy
+        dist = float(np.linalg.norm(delta))
         heading_err = math.atan2(delta[1], delta[0]) - yaw_rad
         heading_err = (heading_err + math.pi) % (2 * math.pi) - math.pi   # [-pi, pi] に正規化
         yaw_rate = float(np.clip(self.yaw_gain * heading_err, -self.yaw_max, self.yaw_max))
@@ -84,15 +92,21 @@ class WaypointFollower:
         vx = self.vx_max * max(0.0, math.cos(heading_err)) * min(1.0, dist / 0.8)
         return vx, 0.0, yaw_rate
 
+    @property
+    def target(self):
+        return self.waypoints[self.idx]
+
 
 def run_patrol(exp_name, ckpt, seed=-1, avoid=True, waypoints="square", laps=1.0, max_time=60.0, out=None,
                camera=None, res=(1280, 720), fps=50, collision_dist=0.25, lidar_warmup=5, avoid_kwargs=None,
-               lidar_min_range=0.0, verbose=True, mcap=None, avoid_version="v2", camera_only=False):
+               lidar_min_range=0.0, verbose=True, mcap=None, avoid_version="v2", camera_only=False, v3_kwargs=None):
     """1 エピソードの巡回を実行して計測値の dict を返す(gs.init() 済みであること)。
 
     out=None なら録画しない(camera_cfg=None、T04 の評価用)。
     mcap=PATH なら nav/mcap_logger.py で LiDAR・姿勢・軌跡・障害物・指令を MCAP に書く(Foxglove 用。既定 None)。
     camera_only=True なら out=None でもカメラを作る(録画はしない)。T07 の再現性の切り分け用。
+    avoid_version="v3": LiDAR から占有格子(nav/grid_map.py)を作り A*(nav/planner.py)で次のウェイポイントまでの経路を
+      計画してローカル目標を経路追従に与える。下層の反応的回避は v1。v3_kwargs: replan_s(1.0), lookahead(0.8), inflate(0.35)
     戻り値: reached, max_laps_idx, end_reason, sim_s, wall_s, n_steps, n_collision, first_collision_t, n_contact,
             first_contact_t, n_raw_hit_steps, n_raw_hits, n_hits_after, path_length, min_lidar, n_placed, scene_meta,
             log(np.ndarray, 列は LOG_HEADER)
@@ -139,9 +153,18 @@ def run_patrol(exp_name, ckpt, seed=-1, avoid=True, waypoints="square", laps=1.0
     env._resample_commands = lambda envs_idx: None   # 指令は追従則で与える
     follower = WaypointFollower(wps, loop=waypoints != "line")
     max_laps_idx = int(len(wps) * laps)
-    avoider = make_avoider(avoid_version, **(avoid_kwargs or {})) if avoid else None
+    v3 = avoid and avoid_version == "v3"
+    v3k = dict(replan_s=1.0, lookahead=0.8, inflate=0.35, inflate_retry=0.25)
+    v3k.update(v3_kwargs or {})
+    avoider = make_avoider("v1" if v3 else avoid_version, **(avoid_kwargs or {})) if avoid else None
+    gmap = GridMap(max_range=max_range) if v3 else None
+    planner = Planner(gmap, inflate=v3k["inflate"], inflate_retry=v3k["inflate_retry"], lookahead=v3k["lookahead"]) if v3 else None
+    replan_steps = max(1, int(round(v3k["replan_s"] / 0.02)))
+    last_plan_step, plan_target_idx = -10 ** 9, -1
+    n_local = 0
     if verbose:
-        print(f"[go2_patrol] avoid={'on ' + str(avoider.params()) if avoider else 'off'}")
+        print(f"[go2_patrol] avoid={'on ' + str(avoider.params()) if avoider else 'off'}"
+              + (f" | v3 map+A*: {v3k}" if v3 else ""))
 
     mcap_logger = None
     if mcap:
@@ -178,6 +201,15 @@ def run_patrol(exp_name, ckpt, seed=-1, avoid=True, waypoints="square", laps=1.0
             if follower.done:
                 end_reason = "completed"
                 break
+            # v3: 1.0 s ごと(またはウェイポイント切替時)に A* で再計画し、経路上 0.8 m 先をローカル目標にする
+            if v3 and scan is not None:
+                if (n_steps - last_plan_step >= replan_steps) or (follower.idx != plan_target_idx):
+                    planner.plan(pos[:2], follower.target)
+                    last_plan_step, plan_target_idx = n_steps, follower.idx
+                lg = planner.local_goal(pos[:2])
+                if lg is not None:
+                    vx, vy, wz = follower.command_to(pos[:2], yaw, lg)
+                    n_local += 1
             vx_follow, wz_follow = vx, wz
             if avoider is not None and scan is not None:
                 vx, wz = avoider(scan, vx, wz)
@@ -192,6 +224,10 @@ def run_patrol(exp_name, ckpt, seed=-1, avoid=True, waypoints="square", laps=1.0
             raw, pts = None, None
             if n_steps >= lidar_warmup:
                 scan, raw, pts = read_scan_full(env)
+                if v3:
+                    bp = env.robot.get_pos()[0].cpu().numpy()
+                    byaw = float(quat_to_xyz(env.robot.get_quat(), rpy=True, degrees=False)[0, 2])
+                    gmap.update(bp[:2], byaw, scan, raw, pts)
                 min_dist = float(scan.min())
                 min_lidar = min(min_lidar, min_dist)
                 raw_hits, hits = int(np.sum(raw < max_range)), int(np.sum(scan < max_range))
@@ -230,6 +266,8 @@ def run_patrol(exp_name, ckpt, seed=-1, avoid=True, waypoints="square", laps=1.0
                                      dict(d_front=av.get("d_front", np.inf), avoid_side=avoider.side if avoider else 0,
                                           committed=av.get("committed", 0), reached=reached, min_dist=min_dist,
                                           contact=contact))
+                if v3 and n_steps % 50 == 0:
+                    mcap_logger.log_grid(n_steps * env.dt, gmap, planner.path_xy)
             n_steps += 1
             if bool(dones[0]):
                 # 環境のエピソード上限によるリセット(time_outs)と転倒(pitch/roll 超過)を区別する
@@ -255,7 +293,14 @@ def run_patrol(exp_name, ckpt, seed=-1, avoid=True, waypoints="square", laps=1.0
                   f"{mcap_stats['points']} points, {mcap_stats['ms_per_step']:.2f} ms/step for logging")
     log = np.array(log)
     path_length = float(np.sum(np.hypot(np.diff(log[:, 1]), np.diff(log[:, 2])))) if len(log) > 1 else 0.0
-    return dict(reached=reached, max_laps_idx=max_laps_idx, end_reason=end_reason, sim_s=n_steps * env.dt,
+    v3_stats = None
+    if v3:
+        v3_stats = dict(n_plans=planner.n_plans, n_fail=planner.n_fail, n_retry=planner.n_retry, n_local=n_local,
+                        occupied_cells=int(gmap.occupied().sum()), last_path=planner.path_xy)
+        if verbose:
+            print(f"[go2_patrol] v3: plans={planner.n_plans} no-path={planner.n_fail} retry(inflate 0.25)={planner.n_retry} "
+                  f"local-goal steps={n_local} occupied cells={v3_stats['occupied_cells']}")
+    return dict(v3_stats=v3_stats, gmap=gmap, reached=reached, max_laps_idx=max_laps_idx, end_reason=end_reason, sim_s=n_steps * env.dt,
                 wall_s=elapsed, n_steps=n_steps, n_collision=n_collision, first_collision_t=first_collision_t,
                 n_contact=n_contact, first_contact_t=first_contact_t, n_raw_hit_steps=n_raw_hit_steps,
                 n_raw_hits=n_raw_hits, n_hits_after=n_hits_after, path_length=path_length, min_lidar=min_lidar,
@@ -296,8 +341,11 @@ def main():
     parser.add_argument("--rate-limit", type=float, default=0.1)
     parser.add_argument("--w-half", type=float, default=0.4, help="回避の正面判定に使う進路の半幅 [m]")
     parser.add_argument("--front-mode", choices=["corridor", "sectors"], default="corridor")
-    parser.add_argument("--avoid-version", choices=["v1", "v2"], default="v2",
-                        help="v1 = T03/T04 の回避則、v2 = コミット区間つき(T05、既定)")
+    parser.add_argument("--avoid-version", choices=["v1", "v2", "v3"], default="v2",
+                        help="v1 = T03/T04 の回避則、v2 = コミット区間つき(T05、既定)、v3 = 占有格子 + A* + v1 下層(T09)")
+    parser.add_argument("--replan-s", type=float, default=1.0, help="v3: 再計画周期 [s]")
+    parser.add_argument("--lookahead", type=float, default=0.8, help="v3: ローカル目標の距離 [m]")
+    parser.add_argument("--inflate", type=float, default=0.35, help="v3: 膨張半径 [m]")
     parser.add_argument("--t-commit", type=float, default=2.0, help="v2: 回避側へのコミット時間 [s]")
     parser.add_argument("--t-clear", type=float, default=1.0, help="v2: 正面が空いた後に直進する時間 [s]")
     parser.add_argument("--lidar-min-range", type=float, default=0.0)
@@ -313,7 +361,16 @@ def main():
                    max_time=args.max_time, out=None if args.no_video else args.out, camera=args.camera, res=args.res,
                    fps=args.fps, collision_dist=args.collision_dist, lidar_warmup=args.lidar_warmup,
                    avoid_kwargs=avoid_kwargs, lidar_min_range=args.lidar_min_range, mcap=args.mcap,
-                   avoid_version=args.avoid_version, camera_only=args.camera_only)
+                   avoid_version=args.avoid_version, camera_only=args.camera_only,
+                   v3_kwargs=dict(replan_s=args.replan_s, lookahead=args.lookahead, inflate=args.inflate))
+    if r.get("v3_stats"):
+        base = os.path.splitext(args.out)[0]
+        if r["v3_stats"]["last_path"]:
+            np.savetxt(base + "_plan.csv", np.array(r["v3_stats"]["last_path"]), delimiter=",", fmt="%.4f", header="x,y", comments="")
+        r["gmap"].save_png(base + "_map.png", robot_xy=r["log"][-1, 1:3], path_xy=r["v3_stats"]["last_path"],
+                           obstacles=r["scene_meta"]["obstacles"], waypoints=[(0, 0)] + WAYPOINT_SETS[args.waypoints],
+                           title=f"v3 map, seed {args.seed}, t={r['sim_s']:.1f}s")
+        print(f"[go2_patrol] wrote {base}_map.png and {base}_plan.csv")
     log_path = os.path.splitext(args.out)[0] + "_log.csv"
     np.savetxt(log_path, r["log"], delimiter=",", fmt="%.4f", header=LOG_HEADER, comments="")
     print(f"[go2_patrol] wrote {'(no video) ' + log_path if args.no_video else args.out}: {r['n_steps']} steps, "

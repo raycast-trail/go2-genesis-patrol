@@ -317,6 +317,8 @@ def compare3_main(args):
         "v1 回避あり": df[(df.avoid == 1) & (df.avoid_version == "v1")],
         "v2 回避あり": df[(df.avoid == 1) & (df.avoid_version == "v2")],
     }
+    if (df.avoid_version == "v3").any():
+        conds["v3 地図+A*"] = df[(df.avoid == 1) & (df.avoid_version == "v3")]
     md = [f"## 3 条件の集計(拡張方策、障害物あり配置 seed {args.scenes}、60 s 上限)\n",
           "| 条件 | n | 成功率 [95% CI] | 接触率 [95% CI] | ニアミス率 | 転倒 | 平均到達 | 所要 [s](成功分) | 経路効率(成功分) |",
           "|---|---|---|---|---|---|---|---|---|"]
@@ -340,6 +342,8 @@ def compare3_main(args):
         return m
     md.append("\n## 対応あり比較(同じ seed)\n")
     pairs = [("v1 回避なし", "v1 回避あり"), ("v1 回避あり", "v2 回避あり")]
+    if "v3 地図+A*" in conds:
+        pairs += [("v1 回避あり", "v3 地図+A*"), ("v2 回避あり", "v3 地図+A*")]
     for la, lb in pairs:
         m = paired(conds[la], conds[lb])
         for metric, mname in [("success", "成功"), ("contact", "接触")]:
@@ -347,18 +351,26 @@ def compare3_main(args):
             b_only, c_only = int(((xa == 1) & (xb == 0)).sum()), int(((xa == 0) & (xb == 1)).sum())
             md.append(f"- **{mname}** {la} vs {lb}(n = {len(m)}): {la} のみ {b_only}、{lb} のみ {c_only} → "
                       f"McNemar 正確検定 p = {mcnemar_exact(b_only, c_only):.4f}")
-    # 所要時間 v1 あり vs v2 あり
+    # 所要時間の対応あり比較(v1 vs v2、v3 があれば v1 vs v3、v2 vs v3 も)
+    time_pairs = [("v1 回避あり", "v2 回避あり")] + ([("v1 回避あり", "v3 地図+A*"), ("v2 回避あり", "v3 地図+A*")] if "v3 地図+A*" in conds else [])
+    for la, lb in time_pairs:
+        m = paired(conds[la], conds[lb])
+        both = m[(m.success_a == 1) & (m.success_b == 1)]
+        diffs = (both.sim_s_b - both.sim_s_a).to_numpy()
+        if len(diffs) == 0:
+            continue
+        n_pos, n_neg = int((diffs > 0.5).sum()), int((diffs < -0.5).sum())
+        w, z, p_w = wilcoxon_signed_rank(diffs)
+        sa, sb = la.split()[0], lb.split()[0]
+        md.append(f"\n## 所要時間: {la} vs {lb}(両方成功した {len(both)} 配置)\n")
+        md.append(f"- {sa} 平均 {both.sim_s_a.mean():.1f} s、{sb} 平均 {both.sim_s_b.mean():.1f} s。差({sb} − {sa})の中央値 {np.median(diffs):+.1f} s、"
+                  f"平均 {diffs.mean():+.1f} s、最小 {diffs.min():+.1f} s、最大 {diffs.max():+.1f} s")
+        md.append(f"- {sb} が 0.5 s 以上速い配置 {n_neg}、遅い配置 {n_pos}、±0.5 s 以内 {len(diffs) - n_pos - n_neg} → "
+                  f"符号検定 p = {sign_test(n_pos, n_neg):.4f}")
+        md.append(f"- Wilcoxon 符号順位検定(正規近似、タイ補正): W+ = {w:.0f}, z = {z:+.2f}, p = {p_w:.4f}")
     m = paired(conds["v1 回避あり"], conds["v2 回避あり"])
     both = m[(m.success_a == 1) & (m.success_b == 1)]
     diffs = (both.sim_s_b - both.sim_s_a).to_numpy()
-    n_pos, n_neg = int((diffs > 0.5).sum()), int((diffs < -0.5).sum())
-    w, z, p_w = wilcoxon_signed_rank(diffs)
-    md.append(f"\n## 所要時間: v1 回避あり vs v2 回避あり(両方成功した {len(both)} 配置)\n")
-    md.append(f"- v1 平均 {both.sim_s_a.mean():.1f} s、v2 平均 {both.sim_s_b.mean():.1f} s。差(v2 − v1)の中央値 {np.median(diffs):+.1f} s、"
-              f"平均 {diffs.mean():+.1f} s、最小 {diffs.min():+.1f} s、最大 {diffs.max():+.1f} s")
-    md.append(f"- v2 が 0.5 s 以上速い配置 {n_neg}、遅い配置 {n_pos}、±0.5 s 以内 {len(diffs) - n_pos - n_neg} → "
-              f"符号検定 p = {sign_test(n_pos, n_neg):.4f}")
-    md.append(f"- Wilcoxon 符号順位検定(正規近似、タイ補正): W+ = {w:.0f}, z = {z:+.2f}, p = {p_w:.4f}")
     # 失敗一覧
     md.append("\n## 失敗配置の一覧\n")
     md.append("| 条件 | seed | 到達 | 終了理由 | 接触ステップ | 所要 [s] |")
@@ -369,6 +381,11 @@ def compare3_main(args):
     v1f_v2s = m[(m.success_a == 0) & (m.success_b == 1)].seed.tolist()
     v1s_v2f = m[(m.success_a == 1) & (m.success_b == 0)].seed.tolist()
     md.append(f"\n- v1 で失敗し v2 で成功: {v1f_v2s}\n- v1 で成功し v2 で失敗: {v1s_v2f}")
+    if "v3 地図+A*" in conds:
+        for la in ["v1 回避あり", "v2 回避あり"]:
+            mm = paired(conds[la], conds["v3 地図+A*"])
+            md.append(f"- {la} で失敗し v3 で成功: {mm[(mm.success_a == 0) & (mm.success_b == 1)].seed.tolist()}、"
+                      f"{la} で成功し v3 で失敗: {mm[(mm.success_a == 1) & (mm.success_b == 0)].seed.tolist()}")
     text = "\n".join(md)
     os.makedirs(args.out_dir, exist_ok=True)
     with open(os.path.join(args.out_dir, "summary.md"), "w", encoding="utf-8") as f:
@@ -380,8 +397,8 @@ def compare3_main(args):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    labels = ["v1\navoid off", "v1\navoid on", "v2\navoid on"]
-    colors = ["#2a78d6", "#eb6834", "#eda100"]
+    labels = ["v1\navoid off", "v1\navoid on", "v2\navoid on", "v3\nmap+A*"][:len(stats)]
+    colors = ["#2a78d6", "#eb6834", "#eda100", "#1baf7a"]
     fig, axes = plt.subplots(1, 3, figsize=(13, 4.4))
     for ax, (key, title) in zip(axes, [("rate_s", "Success rate"), ("rate_c", "Contact rate"), ("time", "Mean time to complete [s]")]):
         for i, (name, st) in enumerate(stats.items()):
@@ -393,7 +410,7 @@ def compare3_main(args):
                 ax.text(i, min(hi, 1.0) + 0.03, f"{v:.0%}", ha="center", va="bottom", fontsize=9, color="#333333")
             elif not np.isnan(v):
                 ax.text(i, v + 0.5, f"{v:.1f}", ha="center", va="bottom", fontsize=9, color="#333333")
-        ax.set_xticks(range(3))
+        ax.set_xticks(range(len(labels)))
         ax.set_xticklabels(labels, fontsize=9)
         ax.set_title(title, fontsize=11)
         if key != "time":
