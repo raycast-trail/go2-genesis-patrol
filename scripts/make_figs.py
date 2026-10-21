@@ -168,8 +168,54 @@ def foxglove_crop(src="results/t06_foxglove_seed10.png", dst="figs/foxglove_crop
     print("wrote", dst, im.crop(box).size)
 
 
+def result_3d_half(path="figs/result_3d_half.png"):
+    """T13: results/eval_3d/episodes.csv から 2D / 3D(25 層)の 2 条件だけを縦 3 段で描く(16 層は入れない)"""
+    import pandas as pd
+    if not os.path.exists("results/eval_3d/episodes.csv"):
+        print("skip result_3d_half")
+        return
+    df = pd.read_csv("results/eval_3d/episodes.csv")
+    df = df[(df.policy == "go2-patrol") & (df.seed >= 100)].copy()
+    df["lidar"] = df["lidar"].fillna("2d")
+    conds = [("2D LiDAR", df[df.lidar == "2d"]), ("3D LiDAR", df[df.lidar == "3d"])]
+    colors = ["#2a78d6", "#1baf7a"]
+    fig, axes = plt.subplots(3, 1, figsize=(6.4, 7.2), dpi=100)
+    for ax, (key, title) in zip(axes, [("success", "成功率(4/4・転倒なし・接触なし)"), ("contact", "接触率(物理接触)"), ("time", "所要時間 [s](成功分の平均)")]):
+        for i, (name, g) in enumerate(conds):
+            n = len(g)
+            if key == "time":
+                v = g[g.success == 1].time_to_complete.astype(float).mean()
+                ax.bar(i, v, 0.6, color=colors[i])
+                ax.text(i, v + 0.6, f"{v:.1f}", ha="center", va="bottom", fontsize=13)
+            else:
+                k = int(g[key].sum())
+                v = k / n
+                lo, hi = wilson(k, n)
+                ax.bar(i, v, 0.6, color=colors[i])
+                ax.errorbar(i, v, yerr=[[v - lo], [hi - v]], fmt="none", ecolor="#333333", capsize=5, lw=1.5)
+                ax.text(i, min(hi, 1.0) + 0.03, f"{v:.0%}", ha="center", va="bottom", fontsize=13)
+        ax.set_xticks(range(2))
+        ax.set_xticklabels([c[0] for c in conds], fontsize=12)
+        ax.set_title(title, fontsize=12)
+        ax.tick_params(axis="y", labelsize=11)
+        if key != "time":
+            ax.set_ylim(0, 1.18)
+            ax.set_yticks([0, 0.25, 0.5, 0.75, 1.0])
+            ax.set_yticklabels(["0%", "25%", "50%", "75%", "100%"])
+        else:
+            ax.set_ylim(0, 36)
+        ax.grid(axis="y", alpha=0.3)
+        for sp in ["top", "right"]:
+            ax.spines[sp].set_visible(False)
+    fig.suptitle("低い箱・テーブル入り 30 配置(v3、誤差棒 = Wilson 95% CI)", fontsize=13)
+    fig.tight_layout(rect=(0, 0, 1, 0.95))
+    fig.savefig(path, dpi=100, facecolor="white")
+    print("wrote", path)
+
+
 if __name__ == "__main__":
     foxglove_crop()
+    result_3d_half()
     arch()
     train_curve()
     train_curve(half=True)

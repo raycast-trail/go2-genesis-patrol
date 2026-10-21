@@ -109,7 +109,7 @@ def resolve_ckpt_dir(exp_name, ckpt_dir=None):
 def run_patrol(exp_name, ckpt, seed=-1, avoid=True, waypoints="square", laps=1.0, max_time=60.0, out=None,
                camera=None, res=(1280, 720), fps=50, collision_dist=0.25, lidar_warmup=5, avoid_kwargs=None,
                lidar_min_range=0.0, verbose=True, mcap=None, avoid_version="v2", camera_only=False, v3_kwargs=None,
-               ckpt_dir=None, lidar="2d"):
+               ckpt_dir=None, lidar="2d", on_step=None):
     """1 エピソードの巡回を実行して計測値の dict を返す(gs.init() 済みであること)。
 
     out=None なら録画しない(camera_cfg=None、T04 の評価用)。
@@ -241,14 +241,17 @@ def run_patrol(exp_name, ckpt, seed=-1, avoid=True, waypoints="square", laps=1.0
             min_dist, collision, raw_hits, hits = max_range, 0, 0, 0
             raw, pts = None, None
             if n_steps >= lidar_warmup:
-                if lidar == "3d":
-                    scan, pts, raw, pts3d, cls3d, _ = read_scan_3d(env)     # 胴体帯だけを 72 本に投影(T12)
+                free_start = None
+                if lidar.startswith("3d"):
+                    scan, pts, raw, pts3d, cls3d, _, free_start = read_scan_3d(env)     # 胴体帯だけを 72 本に投影(T12/T13)
                 else:
                     scan, raw, pts = read_scan_full(env)
+                if on_step is not None:
+                    on_step(n_steps, pos, yaw, scan)                       # 解析用フック(T13 の縁誤差の時系列など)
                 if v3:
                     bp = env.robot.get_pos()[0].cpu().numpy()
                     byaw = float(quat_to_xyz(env.robot.get_quat(), rpy=True, degrees=False)[0, 2])
-                    gmap.update(bp[:2], byaw, scan, raw, pts)
+                    gmap.update(bp[:2], byaw, scan, raw, pts, free_start=free_start)
                 min_dist = float(scan.min())
                 min_lidar = min(min_lidar, min_dist)
                 raw_hits, hits = int(np.sum(raw < max_range)), int(np.sum(scan < max_range))
@@ -292,7 +295,7 @@ def run_patrol(exp_name, ckpt, seed=-1, avoid=True, waypoints="square", laps=1.0
                                           contact=contact))
                 if v3 and n_steps % 50 == 0:
                     mcap_logger.log_grid(n_steps * env.dt, gmap, planner.path_xy)
-                if lidar == "3d" and pts3d is not None:
+                if lidar.startswith("3d") and pts3d is not None:
                     mcap_logger.log_points3d(n_steps * env.dt, pts3d, cls3d)
                     # IMU 相当: 胴体角速度(観測)と線加速度(胴体フレーム速度の差分 + 重力)。提出後の SLAM 実験用の素材
                     lv = env.base_lin_vel[0].cpu().numpy().astype(np.float64)
@@ -385,8 +388,9 @@ def main():
     parser.add_argument("--t-commit", type=float, default=2.0, help="v2: 回避側へのコミット時間 [s]")
     parser.add_argument("--t-clear", type=float, default=1.0, help="v2: 正面が空いた後に直進する時間 [s]")
     parser.add_argument("--lidar-min-range", type=float, default=0.0)
-    parser.add_argument("--lidar", choices=["2d", "3d"], default="2d",
-                        help="2d = 水平 72 本(既定)、3d = 72 × 16 層を胴体の高さ帯で 72 本に投影(T12)")
+    parser.add_argument("--lidar", choices=["2d", "3d", "3d-dense", "3d-dense-only"], default="2d",
+                        help="2d = 水平 72 本(既定)、3d = 72 × 16 層(±30°、T12/T13 の既定 3D)、3d-dense = 30 層(±12° 1° 刻み + "
+                             "下向き −30〜−14°、T13 試作)、3d-dense-only = ±12° の 25 層のみ。3D は胴体の高さ帯で 72 本に投影")
     parser.add_argument("--summary-csv", type=str, default="results/t03_metrics.csv",
                         help="実行ごとの要約行を追記する CSV(空文字で無効)")
     args = parser.parse_args()

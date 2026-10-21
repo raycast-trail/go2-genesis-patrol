@@ -24,6 +24,23 @@ Unitree Go2 の歩行方策を Genesis 上で強化学習し、その上に疑�
 - 既定例題の方策(前進 0.5 m/s のみ)は旋回できず、全条件で成功 0%(`results/eval/`、15 配置)
 - 転倒は全エピソードで 0
 
+### 3D LiDAR: 2D では見えない障害物(T12 / T13)
+
+センサ面(z ≈ 0.44 m)より低い **箱(高さ 0.15 m)** と **テーブルの天板(0.32〜0.36 m)** は水平 2D スキャンに映らない。`--lidar 3d` では 72 × 16 層(垂直 ±30°、4° 刻み)の点群を胴体の高さ帯(0.05〜0.49 m)で切って 72 本に投影し、ナビ層はそのまま使う(実機の voxel layer と同じ処理)。混合配置 30 シーン(seed 100〜129、低い箱 + テーブル + 高い障害物、少なくとも 1 つが経路上)、v3。数値は `results/eval_3d/summary.md`。
+
+| 条件 | 成功率 [95% CI] | 接触率 | 転倒 | 所要 [s](成功分) |
+|---|---|---|---|---|
+| v3 + 2D LiDAR | 1/30 = 3% [1–17%] | 97% | 6 | 16.6 |
+| **v3 + 3D LiDAR(16 層 ±30°、既定)** | **30/30 = 100%** [89–100%] | **0%** | 0 | 27.5 |
+| v3 + 3D 30 層(±12° 1° 刻み + 下向き 5 層、`--lidar 3d-dense`、試作) | 29/30 = 97% [83–99%] | 0% | 0 | 30.6 |
+| v3 + 3D 25 層(±12° のみ、`--lidar 3d-dense-only`) | 10/30 = 33% | 67% | 18 | 24.8 |
+
+![summary3d](results/eval_3d/summary.png)
+
+- 2D → 3D(16 層): 成功・接触とも McNemar p < 0.0001。2D の失敗は低い箱を踏む(7 件、うち 6 件転倒)か天板に胴体が当たる(23 件)
+- 層を密にした試作(30 層)は天板の縁の検出誤差を 0.37 m(90 パーセンタイル)から 0.03 m に下げたが、テーブルの脇で反応的回避の下層が減速する時間が増えて所要時間が伸びた(1 配置が時間切れ、接触なし)ので既定にしていない。±12° だけ(25 層)にすると近くの低い箱が見えなくなり踏む。詳細は `reports/13_lidar3d_dense_integrate.md`
+- 3D の追加コストは +0.5〜0.8 ms/step(CPU)
+
 ## 構成
 
 ![arch](figs/arch.png)
@@ -31,7 +48,7 @@ Unitree Go2 の歩行方策を Genesis 上で強化学習し、その上に疑�
 | 層 | 実装 | 内容 |
 |---|---|---|
 | 歩行(学習) | `go2_train_patrol.py`, `go2_env.py` | Genesis 例題の Go2 環境で PPO(rsl-rl)。指令範囲を vx 0〜0.8 m/s、ωz ±0.8 rad/s に広げて 4096 env × 300 it(M1 Max / Metal で約 9 分)。方策は 50 Hz で 12 関節の目標角を出す |
-| 知覚 | `nav/lidar.py` | Genesis の Raycaster を胴体に取り付けた疑似 2D LiDAR(72 本 / 5° / 5 m)。地面除去とセクタ最小距離 |
+| 知覚 | `nav/lidar.py` | Genesis の Raycaster を胴体に取り付けた疑似 2D LiDAR(72 本 / 5° / 5 m)。地面除去とセクタ最小距離。`--lidar 3d` では 72 × 16 層の 3D 点群を高さで分類(地面 / 胴体帯 / 頭上 / 自機)し、胴体帯の点だけを 72 本に投影してナビ層に渡す(空き更新はレイが低い高さにある区間のみ) |
 | ナビゲーション | `nav/avoid.py`, `nav/grid_map.py`, `nav/planner.py`, `go2_patrol.py` | ウェイポイント追従(P 制御)の上に、下記の v1 / v2 / v3 を載せて速度指令 (vx, vy, ωz) を出す。姿勢は Genesis の真の値(SLAM なし) |
 
 | 回避則 | 仕組み | 特徴 |
@@ -69,18 +86,27 @@ python go2_patrol.py -e go2-patrol --ckpt 299 --backend cpu --seed 28 --avoid --
 python go2_patrol.py -e go2-patrol --ckpt 299 --backend cpu --seed 10 --avoid --avoid-version v3 --no-video --mcap results/mcap/run.mcap
 #    --seed -1 で障害物なし、--no-avoid で経路追従のみ。v3 では <out>_map.png と <out>_plan.csv も出力
 
+# 3b. 3D LiDAR(低い箱・テーブル入りの混合配置 seed 100〜129。seed ≥ 100 は自動で mixed プロファイル)
+python eval/scenes.py --seed 100 101 --profile mixed
+python go2_patrol.py -e go2-patrol --ckpt 299 --backend cpu --seed 103 --avoid --avoid-version v3 --lidar 3d --camera overhead-close --out videos/patrol3d.mp4
+#    --lidar 2d|3d(16 層、既定の 3D)|3d-dense(30 層、試作)|3d-dense-only(±12° のみ)。3D の --mcap には /lidar/points3d と /imu も入る
+
 # 4. 定量評価(45 配置 × 条件、録画なし、約 6〜12 分/条件)と集計
 python eval/run_eval.py --policies go2-patrol:299 --avoid both --seeds 5-49 --avoid-version v1 --backend cpu --out results/eval_50/episodes.csv
 python eval/run_eval.py --policies go2-patrol:299 --avoid on   --seeds 5-49 --avoid-version v2 --backend cpu --out results/eval_50/episodes.csv
 python eval/run_eval.py --policies go2-patrol:299 --avoid on   --seeds 5-49 --avoid-version v3 --backend cpu --out results/eval_50/episodes.csv
 python eval/summarize.py --compare3 results/eval_50/episodes.csv --scenes 5-49 --out-dir results/eval_50
-#    episodes.csv は 1 本ごとに追記され、済みの (policy, avoid, seed, version) はスキップする(中断・再開可)
+#    episodes.csv は 1 本ごとに追記され、済みの (policy, avoid, seed, version, lidar) はスキップする(中断・再開可)
+# 4b. 3D LiDAR の評価(30 配置 × 2D / 3D、約 5 分/条件)
+python eval/run_eval.py --policies go2-patrol:299 --avoid on --seeds 100-129 --avoid-version v3 --lidar 2d --backend cpu --out results/eval_3d/episodes.csv
+python eval/run_eval.py --policies go2-patrol:299 --avoid on --seeds 100-129 --avoid-version v3 --lidar 3d --backend cpu --out results/eval_3d/episodes.csv
+python eval/summarize.py --compare-lidar results/eval_3d/episodes.csv --scenes 100-129 --out-dir results/eval_3d
 
 # 5. Foxglove で 3D 表示(LiDAR 点群・軌跡・障害物・TF・指令。v3 は /map と /plan も)
 #    Foxglove アプリ: Open local file → results/mcap/t06_seed10.mcap、Layout → Import → docs/foxglove_layout.json
 #    (3D パネルの表示フレームを world にする。Plot パネルは /nav/state.vx, .yaw_rate, .d_front)
 
-# 6. 提出動画の再生成(図 → 構成図 → カード → 結合。素材は videos/raw/ に同梱)
+# 6. 提出動画の再生成(図 → 構成図 → カード → 結合。素材は videos/raw/ に同梱。3D のショットは videos/raw/t12_* があれば入る)
 python scripts/make_figs.py && python scripts/make_arch.py && python scripts/make_cards.py && python scripts/check_margins.py
 python scripts/make_video.py --v1-seed28-start 14 --v2-seed28-start 6 --v3-seed28-start 9.7
 ```
@@ -92,10 +118,10 @@ python scripts/make_video.py --v1-seed28-start 14 --v2-seed28-start 6 --v3-seed2
 | `go2_env.py`, `go2_train.py` | Genesis v1.4.4 例題由来の Go2 環境と学習(Apache-2.0、`NOTICE`)。環境にはカメラ / LiDAR / 障害物の差し込み口を追加 |
 | `go2_train_patrol.py` | 指令範囲を広げた学習 |
 | `go2_record.py`, `go2_patrol.py` | headless 録画 / ウェイポイント巡回(回避則の切替、MCAP、v3 の地図出力) |
-| `nav/` | `lidar.py`(疑似 LiDAR)、`avoid.py`(v1 / v2)、`grid_map.py`・`planner.py`(v3)、`mcap_logger.py` |
-| `eval/` | `scenes.py`(乱数配置)、`run_eval.py`(評価ループ)、`summarize.py`(集計・検定)、`plot_traj.py`、`lidar_test.py`、`map_test.py`、`repro_check.py` |
+| `nav/` | `lidar.py`(疑似 LiDAR 2D / 3D)、`avoid.py`(v1 / v2)、`grid_map.py`・`planner.py`(v3)、`mcap_logger.py` |
+| `eval/` | `scenes.py`(乱数配置、mixed プロファイル)、`run_eval.py`(評価ループ)、`summarize.py`(集計・検定)、`plot_traj.py`、`lidar_test.py`、`lidar3d_test.py`、`geom_test.py`、`table_edge_test.py`、`map_test.py`、`repro_check.py` |
 | `checkpoints/go2-patrol/` | 学習済み方策(`model_299.pt`、`cfgs.pkl`) |
-| `results/` | 評価 CSV・図(`eval_50/` が 45 配置 × 4 条件、`eval/` が 15 配置 × 2 方策 × 2 条件)、シーン JSON(`scenes/`)、MCAP(`mcap/`) |
+| `results/` | 評価 CSV・図(`eval_50/` が 45 配置 × 4 条件、`eval_3d/` が混合 30 配置 × 2D / 3D、`eval/` が 15 配置 × 2 方策 × 2 条件)、シーン JSON(`scenes/`)、MCAP(`mcap/`) |
 | `videos/` | 代表動画、`raw/`(動画素材)、`final/`(提出動画) |
 | `figs/`, `scripts/` | 動画用の図・カードと、その生成・結合スクリプト |
 | `docs/` | 設計書、実現可能性調査、Foxglove レイアウト、`report/`(レポート PDF・HTML・図) |
@@ -106,7 +132,7 @@ python scripts/make_video.py --v1-seed28-start 14 --v2-seed28-start 6 --v3-seed2
 - 自己位置は Genesis の真の姿勢を使っている(SLAM・オドメトリなし)。地図と計画の結果は「自己位置が正確なら」の上限
 - 障害物は静止した Box / Cylinder のみ。動く障害物は扱っていない
 - CPU バックエンドの物理には実行ごとの揺れがあり、同じ配置でも成功 / 失敗が変わることがある(`results/repro_seed12.csv`)。評価は集計値と信頼区間で比較している
-- LiDAR は実機の 3D LiDAR を 72 本の 2D スキャンに簡略化し、地面除去は真の高さで行っている
+- LiDAR は疑似(Raycaster)。2D は 72 本の水平スキャン、3D は垂直 ±30° の 16 層(4° 刻み)で、高さ分類は真の高さで行う。崖・段差・斜面は未対応。張り出し物(天板)の縁は層の粗さの分(最大 0.4 m 程度)遠くに検出される。層を密にすると縁は正確になるが、テーブルの脇で反応的回避の下層が減速して所要時間が伸びる(`reports/13_lidar3d_dense_integrate.md`)
 - Metal バックエンドは 1 env では CPU より遅い(21 ms/step 対 2 ms/step)。学習は Metal、評価は CPU と使い分ける
 - 衝突は物理接触で判定している。設計時の LiDAR 距離 < 0.25 m は正面の押し付けを検出できず、ニアミスの副指標に回した
 
@@ -125,6 +151,8 @@ python scripts/make_video.py --v1-seed28-start 14 --v2-seed28-start 6 --v3-seed2
 | T09 | 占有格子 + A* 大域計画(v3) | `reports/09_map_planner.md` |
 | T10 | 動画 v2(v3 の反映、テロップ余白) | `reports/10_video_v2.md` |
 | T11 | 構成図の作り直し、動画 v2.1、README、クリーンクローン検証 | `reports/11_arch_readme.md` |
+| T12 | 3D 疑似 LiDAR と低い箱・テーブル(2D では見えない障害物) | `reports/12_lidar3d.md` |
+| T13 | 3D の層を密にする(天板の縁)、動画 v3、README 反映 | `reports/13_lidar3d_dense_integrate.md` |
 
 ## ライセンス・使用 OSS
 

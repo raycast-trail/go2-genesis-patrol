@@ -66,7 +66,8 @@ def main():
     parser.add_argument("--t-commit", type=float, default=2.0)
     parser.add_argument("--t-clear", type=float, default=1.0)
     parser.add_argument("--camera-only", action="store_true", help="カメラを作るが録画しない(T07 の再現性対策)")
-    parser.add_argument("--lidar", choices=["2d", "3d"], default="2d", help="T12: 3d = 高さ帯投影の 3D LiDAR")
+    parser.add_argument("--lidar", choices=["2d", "3d", "3d-dense", "3d-dense-only"], default="2d",
+                        help="3d = 16 層 ±30°(既定の 3D)、3d-dense = 30 層(T13 試作)、3d-dense-only = 25 層 ±12°。高さ帯投影の 3D LiDAR")
     args = parser.parse_args()
 
     policies = [(p.split(":")[0], int(p.split(":")[1])) for p in args.policies.split(",")]

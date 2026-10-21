@@ -444,7 +444,12 @@ def compare_lidar_main(args):
     df = df[(df.policy == "go2-patrol") & (df.seed.isin(seeds))].copy()
     df["lidar"] = df["lidar"].fillna("2d")
     df["first_contact_type"] = df["first_contact_type"].fillna("")
-    conds = {"v3 + 2D LiDAR": df[df.lidar == "2d"], "v3 + 3D LiDAR": df[df.lidar == "3d"]}
+    conds = {"v3 + 2D LiDAR": df[df.lidar == "2d"]}
+    if (df.lidar == "3d-dense-only").any():
+        conds["v3 + 3D 25 層(±12° のみ)"] = df[df.lidar == "3d-dense-only"]
+    if (df.lidar == "3d-dense").any():
+        conds["v3 + 3D 30 層(±12° 1° 刻み + 下向き 5 層)"] = df[df.lidar == "3d-dense"]
+    conds["v3 + 3D LiDAR"] = df[df.lidar == "3d"]          # 既定の 3D: 16 層 ±30°
     md = [f"## 2D / 3D LiDAR の比較(拡張方策 × v3、混合配置 seed {args.scenes}、60 s 上限)\n",
           "| 条件 | n | 成功率 [95% CI] | 接触率 [95% CI] | 転倒率 | 平均到達 | 所要 [s](成功分) | 経路効率(成功分) |",
           "|---|---|---|---|---|---|---|---|"]
@@ -459,20 +464,24 @@ def compare_lidar_main(args):
         stats[name] = dict(n=n, rate_s=ks / n, rate_c=kc / n, ci_s=cis, ci_c=cic, time=t)
         md.append(f"| {name} | {n} | {ks}/{n} = {ks / n:.0%} [{cis[0]:.0%}–{cis[1]:.0%}] | {kc}/{n} = {kc / n:.0%} "
                   f"[{cic[0]:.0%}–{cic[1]:.0%}] | {kf}/{n} | {g.reached.mean():.2f} | {t:.1f} | {e:.2f} |")
-    a, b = conds["v3 + 2D LiDAR"], conds["v3 + 3D LiDAR"]
     cols = ["seed", "success", "contact", "fell", "sim_s", "reached", "end_reason", "first_contact_type", "contact_types"]
-    m = a[cols].merge(b[cols], on="seed", suffixes=("_2d", "_3d"))
     md.append("\n## 対応あり比較(同じ seed)\n")
-    for metric, name in [("success", "成功"), ("contact", "接触")]:
-        x2, x3 = m[f"{metric}_2d"].astype(int), m[f"{metric}_3d"].astype(int)
-        b_only, c_only = int(((x2 == 1) & (x3 == 0)).sum()), int(((x2 == 0) & (x3 == 1)).sum())
-        md.append(f"- **{name}** 2D vs 3D(n = {len(m)}): 2D のみ {b_only}、3D のみ {c_only} → McNemar 正確検定 p = {mcnemar_exact(b_only, c_only):.4f}")
-    both = m[(m.success_2d == 1) & (m.success_3d == 1)]
-    if len(both):
-        diffs = (both.sim_s_3d - both.sim_s_2d).to_numpy()
-        n_pos, n_neg = int((diffs > 0.5).sum()), int((diffs < -0.5).sum())
-        md.append(f"- **所要時間**(両方成功した {len(both)} 配置): 2D 平均 {both.sim_s_2d.mean():.1f} s、3D 平均 {both.sim_s_3d.mean():.1f} s、"
-                  f"差(3D − 2D)の中央値 {np.median(diffs):+.1f} s。3D が速い {n_neg} / 遅い {n_pos} → 符号検定 p = {sign_test(n_pos, n_neg):.4f}")
+    names = list(conds)
+    pairs = [(names[0], names[-1])] + [(n, names[-1]) for n in names[1:-1]]
+    for la, lb in pairs:
+        mm = conds[la][cols].merge(conds[lb][cols], on="seed", suffixes=("_a", "_b"))
+        for metric, name in [("success", "成功"), ("contact", "接触")]:
+            xa, xb = mm[f"{metric}_a"].astype(int), mm[f"{metric}_b"].astype(int)
+            b_only, c_only = int(((xa == 1) & (xb == 0)).sum()), int(((xa == 0) & (xb == 1)).sum())
+            md.append(f"- **{name}** {la} vs {lb}(n = {len(mm)}): 前者のみ {b_only}、後者のみ {c_only} → McNemar 正確検定 p = {mcnemar_exact(b_only, c_only):.4f}")
+        both = mm[(mm.success_a == 1) & (mm.success_b == 1)]
+        if len(both):
+            diffs = (both.sim_s_b - both.sim_s_a).to_numpy()
+            n_pos, n_neg = int((diffs > 0.5).sum()), int((diffs < -0.5).sum())
+            md.append(f"- **所要時間** {la} vs {lb}(両方成功した {len(both)} 配置): {both.sim_s_a.mean():.1f} s vs {both.sim_s_b.mean():.1f} s、"
+                      f"差の中央値 {np.median(diffs):+.1f} s。後者が速い {n_neg} / 遅い {n_pos} → 符号検定 p = {sign_test(n_pos, n_neg):.4f}")
+    a, b = conds[names[0]], conds[names[-1]]
+    m = a[cols].merge(b[cols], on="seed", suffixes=("_2d", "_3d"))
     md.append("\n## 失敗の内訳(障害物タイプ別)\n")
     md.append("| 条件 | 低い箱に接触 | テーブル天板に接触 | テーブル脚に接触 | 高い障害物に接触 | 転倒 | 時間切れ(接触なし) | 成功 |")
     md.append("|---|---|---|---|---|---|---|---|")
@@ -488,11 +497,19 @@ def compare_lidar_main(args):
         md.append(f"| {name} | {low} | {top} | {leg} | {high} | {fell} | {to} | {int(g.success.sum())} |")
     md.append("\n(接触は 1 エピソード内で複数タイプに当たることがあるので合計は接触エピソード数を超えうる)")
     md.append("\n## seed ごと\n")
-    md.append("| seed | 2D 到達 | 成功 | 接触(最初の相手) | 所要 [s] | 3D 到達 | 成功 | 接触(最初の相手) | 所要 [s] |")
-    md.append("|---|---|---|---|---|---|---|---|---|")
-    for _, r in m.sort_values("seed").iterrows():
-        md.append(f"| {int(r.seed)} | {int(r.reached_2d)}/4 | {int(r.success_2d)} | {int(r.contact_2d)} ({r.first_contact_type_2d or '—'}) | {r.sim_s_2d:.1f} | "
-                  f"{int(r.reached_3d)}/4 | {int(r.success_3d)} | {int(r.contact_3d)} ({r.first_contact_type_3d or '—'}) | {r.sim_s_3d:.1f} |")
+    hdr = "| seed | " + " | ".join(f"{n}: 到達 / 成功 / 接触(相手) / 所要 [s]" for n in names) + " |"
+    md.append(hdr)
+    md.append("|---|" + "---|" * len(names))
+    by = {n: conds[n].set_index("seed") for n in names}
+    for sd in sorted(set(m.seed)):
+        cells = []
+        for n in names:
+            if sd in by[n].index:
+                r = by[n].loc[sd]
+                cells.append(f"{int(r.reached)}/4 / {int(r.success)} / {int(r.contact)} ({r.first_contact_type or '—'}) / {r.sim_s:.1f}")
+            else:
+                cells.append("—")
+        md.append(f"| {sd} | " + " | ".join(cells) + " |")
     text = "\n".join(md)
     os.makedirs(args.out_dir, exist_ok=True)
     with open(os.path.join(args.out_dir, "summary.md"), "w", encoding="utf-8") as f:
@@ -503,9 +520,12 @@ def compare_lidar_main(args):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    labels = ["v3 + 2D", "v3 + 3D"]
-    colors = ["#2a78d6", "#1baf7a"]
-    fig, axes = plt.subplots(1, 3, figsize=(11, 4.2))
+    labels = {"v3 + 2D LiDAR": "2D", "v3 + 3D 25 層(±12° のみ)": "3D 25 layers\n±12° only",
+              "v3 + 3D 30 層(±12° 1° 刻み + 下向き 5 層)": "3D 30 layers\n(dense trial)", "v3 + 3D LiDAR": "3D 16 layers\n±30° (default)"}
+    labels = [labels[n] for n in stats]
+    colors = {"v3 + 2D LiDAR": "#2a78d6", "v3 + 3D 25 層(±12° のみ)": "#e87ba4", "v3 + 3D 30 層(±12° 1° 刻み + 下向き 5 層)": "#eda100", "v3 + 3D LiDAR": "#1baf7a"}
+    colors = [colors[n] for n in stats]
+    fig, axes = plt.subplots(1, 3, figsize=(14, 4.8))
     for ax, (key, title) in zip(axes, [("rate_s", "Success rate"), ("rate_c", "Contact rate"), ("time", "Mean time to complete [s]")]):
         for i, (name, st) in enumerate(stats.items()):
             v = st[key]
@@ -516,8 +536,8 @@ def compare_lidar_main(args):
                 ax.text(i, min(hi, 1.0) + 0.03, f"{v:.0%}", ha="center", va="bottom", fontsize=9)
             elif not np.isnan(v):
                 ax.text(i, v + 0.5, f"{v:.1f}", ha="center", va="bottom", fontsize=9)
-        ax.set_xticks(range(2))
-        ax.set_xticklabels(labels)
+        ax.set_xticks(range(len(labels)))
+        ax.set_xticklabels(labels, fontsize=8.5)
         ax.set_title(title, fontsize=11)
         if key != "time":
             ax.set_ylim(0, 1.18)

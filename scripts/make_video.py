@@ -113,6 +113,11 @@ def main():
         seq.append(("10d seed28 軌跡図(静止)", p))
     p = o("C4"); side_by_side(f"{C}/C4h.png", "figs/result_50_half.png", 10, p); seq.append(("11 C4 + 結果(4 条件)", p))
     p = o("C5"); still(f"{C}/C5.png", 7, p); seq.append(("12 C5", p))
+    if os.path.exists(f"{R}/t12_3d_seed103_close.mp4") and os.path.exists(f"{C}/C7.png"):     # T13: 3D LiDAR のショット
+        p = o("C7"); still(f"{C}/C7.png", 5, p); seq.append(("12b C7 3D LiDAR", p))
+        p = o("s103_2d"); clip(f"{R}/t12_2d_seed103_close.mp4", p, start=0, dur=6, speed=1.0, banner=f"{C}/B12c.png"); seq.append(("12c 2D seed103(等速、転倒まで 6 s)", p))
+        p = o("s103_3d"); clip(f"{R}/t12_3d_seed103_close.mp4", p, start=0, dur=10, speed=2.0, banner=f"{C}/B12d.png"); seq.append(("12d 3D seed103(2 倍速)", p))
+        p = o("C8"); side_by_side(f"{C}/C8h.png", "figs/result_3d_half.png", 7, p); seq.append(("12e C8h + 3D 結果", p))
     p = o("C6"); still(f"{C}/C6.png", 8, p); seq.append(("13 C6 まとめ", p))
 
     lst = os.path.join(tmp, "list.txt")

@@ -23,7 +23,7 @@ import genesis as gs  # noqa: E402
 from go2_env import Go2Env  # noqa: E402
 from go2_train import get_cfgs  # noqa: E402
 from eval.scenes import spec_to_morphs, TABLE_TOP_BOTTOM, TABLE_THICKNESS, TABLE_LEG_R, TABLE_LEG_INSET, LOWBOX_H  # noqa: E402
-from nav.lidar import (ANGLES_DEG, IDX_FRONT, IDX_LEFT, IDX_RIGHT, N_LAYERS, make_lidar_cfg, read_scan, read_scan_3d,  # noqa: E402
+from nav.lidar import (ANGLES_DEG, IDX_FRONT, IDX_LEFT, IDX_RIGHT, make_lidar_cfg, read_scan, read_scan_3d,  # noqa: E402
                        CLS_GROUND, CLS_BODY, CLS_OVERHEAD, CLS_SELF)
 
 SPEC = [dict(type="lowbox", pos=[1.5, 0.0], size=[0.4, 0.4, LOWBOX_H]),                       # 正面、面は x = 1.3
@@ -59,6 +59,8 @@ def main():
     parser.add_argument("--backend", choices=["gpu", "cpu"], default="cpu")
     parser.add_argument("--steps", type=int, default=100)
     parser.add_argument("--out", default="results/t12_lidar3d_test.png")
+    parser.add_argument("--mode", choices=["3d", "3d-dense", "3d-dense-only"], default="3d",
+                        help="3d = 16 層 ±30°(既定)、3d-dense = 30 層(T13 試作)、3d-dense-only = 25 層 ±12°")
     args = parser.parse_args()
     gs.init(backend=gs.gpu if args.backend == "gpu" else gs.cpu, precision="32", logging_level="warning")
     cfgs = list(get_cfgs())
@@ -67,12 +69,13 @@ def main():
     env2 = build("2d", cfgs)
     (scan2, raw2), ms_step2, ms_read2 = run(env2, "2d", args.steps)
     base = env2.robot.get_pos()[0].cpu().numpy()
-    env3 = build("3d", cfgs)
+    env3 = build(args.mode, cfgs)
     pat = env3.lidar_cfg["pattern"]
     el = np.rad2deg(torch.as_tensor(pat.angles[1]).cpu().numpy())
-    (scan3, pts2d, raw3, pts_all, cls_all, d_all), ms_step3, ms_read3 = run(env3, "3d", args.steps)
+    (scan3, pts2d, raw3, pts_all, cls_all, d_all, fs3), ms_step3, ms_read3 = run(env3, "3d", args.steps)
+    N_LAYERS = len(el)
     base3 = env3.robot.get_pos()[0].cpu().numpy()
-    print(f"[lidar3d] vertical angles ({N_LAYERS}): {np.round(el, 1).tolist()}  (center {el.mean():+.1f} deg, horizontal ray: "
+    print(f"[lidar3d] mode={args.mode} vertical angles ({len(el)}): {np.round(el, 1).tolist()}  (center {el.mean():+.1f} deg, horizontal ray: "
           f"{'yes' if np.any(np.abs(el) < 1e-6) else 'no (symmetric about 0)'})")
     # 立位でレイの z 分布: 仰角 0 近傍の層のヒット点 z
     hit = d_all < env3.lidar_cfg["max_range"]
@@ -99,6 +102,7 @@ def main():
     fig = plt.figure(figsize=(15, 5))
     for i, (sc, title) in enumerate([(scan2, "2D scan (horizontal, z = sensor)"), (scan3, "3D -> body-band projection (72 az)")]):
         ax = fig.add_subplot(1, 3, i + 1, projection="polar")
+        title = title.replace("72 az", f"{len(el)} layers")
         ax.set_theta_zero_location("N")
         ax.plot(th, np.minimum(sc, mr), "o", ms=3, color="tab:blue" if i == 0 else "tab:orange")
         ax.set_rmax(3.0)
@@ -115,7 +119,7 @@ def main():
     ax.view_init(elev=35, azim=-60)
     ax.legend(fontsize=7, loc="upper left")
     ax.set_title("3D points by height class", fontsize=10)
-    fig.suptitle("T12: low box front (1.3 m, h 0.15), table right (edge 1.5 m, top 0.32-0.36 m), tall box left (1.5 m)", fontsize=11)
+    fig.suptitle(f"{args.mode} ({len(el)} layers): low box front (1.3 m, h 0.15), table right (edge 1.5 m, top 0.32-0.36 m), tall box left (1.5 m)", fontsize=11)
     fig.tight_layout()
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     fig.savefig(args.out, dpi=130)

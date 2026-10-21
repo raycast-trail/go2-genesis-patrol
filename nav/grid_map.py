@@ -41,17 +41,22 @@ class GridMap:
         return 0 <= ix < self.nx and 0 <= iy < self.ny
 
     # --- 更新 ---
-    def update(self, sensor_xy, yaw, scan, raw, pts_world):
-        """1 スキャン分の更新。scan: 地面除去後 (72,)、raw: 生距離 (72,)、pts_world: ヒット点 (72, 3) world"""
+    def update(self, sensor_xy, yaw, scan, raw, pts_world, free_start=None):
+        """1 スキャン分の更新。scan: 地面除去後 (72,)、raw: 生距離 (72,)、pts_world: ヒット点 (72, 3) world。
+        free_start (72,) を渡すと空き更新をその距離から始める(3D: レイが低い高さにある区間だけ。T13)"""
         sx, sy = float(sensor_xy[0]), float(sensor_xy[1])
         hit = scan < self.max_range
         # レイごとの「空き」の終端距離: ヒットならヒット距離、地面除去なら床までの距離、それ以外は max_range
         free_len = np.where(hit, scan, np.where(raw < self.max_range, raw, self.max_range)).astype(np.float64)
+        if free_start is not None:
+            free_len = np.minimum(free_len, np.asarray(raw, dtype=np.float64))   # 3D: raw は「低い高さで確認した空き」の終端
         dirs = np.stack([np.cos(yaw + _ANG), np.sin(yaw + _ANG)], axis=1)
         step = self.res / 2.0
         n_samp = int(self.max_range / step) + 1
         s = (np.arange(n_samp) * step)[None, :]                     # (1, n_samp)
         valid = s < (free_len[:, None] - self.res)                  # ヒットセルの手前まで
+        if free_start is not None:
+            valid &= s >= np.asarray(free_start, dtype=np.float64)[:, None]
         px = sx + dirs[:, 0:1] * s
         py = sy + dirs[:, 1:2] * s
         ix = np.floor((px - self.xmin) / self.res).astype(int)
