@@ -30,12 +30,13 @@ plt.rcParams["axes.unicode_minus"] = False
 os.makedirs("figs", exist_ok=True)
 
 
-def pad_to_frame(src, dst, bg=(255, 255, 255)):
+def pad_to_frame(src, dst, bg=(255, 255, 255), top=0):
+    """src を W×H に収めてパディング。top > 0 なら上 top px を空けて(帯テロップの下に)配置"""
     im = Image.open(src).convert("RGB")
-    scale = min(W / im.width, H / im.height)
+    scale = min(W / im.width, (H - top) / im.height)
     im = im.resize((int(im.width * scale), int(im.height * scale)), Image.LANCZOS)
     canvas = Image.new("RGB", (W, H), bg)
-    canvas.paste(im, ((W - im.width) // 2, (H - im.height) // 2))
+    canvas.paste(im, ((W - im.width) // 2, top + (H - top - im.height) // 2))
     canvas.save(dst)
     print("wrote", dst)
 
@@ -48,15 +49,16 @@ def arch():
     boxes = [
         (0.4, 4.6, 2.3, 1.3, "ウェイポイント列\n(2 m 角の正方形)", "#e8eef8"),
         (3.2, 4.6, 2.3, 1.3, "経路追従\n(P 制御)", "#e8eef8"),
-        (6.0, 4.6, 2.6, 1.3, "回避則 v1 / v2\n回廊判定・減速・旋回", "#fde9df"),
+        (6.0, 4.6, 2.6, 1.3, "反応的回避 v1 / v2\n(v3 では下層)", "#fde9df"),
         (9.3, 4.6, 3.1, 1.3, "速度指令 (vx, vy, ωz)\nvx 0–0.8, ωz ±0.8", "#e8eef8"),
         (9.3, 2.3, 3.1, 1.3, "歩行方策 (RL / PPO)\n4096 env 並列学習", "#e4f5ec"),
         (8.9, 0.3, 3.7, 1.3, "Genesis 物理シム\nGo2 + 障害物", "#f3f3f3"),
-        (3.2, 1.9, 4.3, 1.7, "疑似 2D LiDAR (Raycaster)\n72 本 / 5° / 5 m\n地面除去 → セクタ最小距離", "#fde9df"),
+        (3.6, 1.9, 4.0, 1.7, "疑似 2D LiDAR (Raycaster)\n72 本 / 5° / 5 m\n地面除去 → セクタ最小距離", "#fde9df"),
+        (0.2, 2.0, 3.1, 1.6, "占有格子 + A* (v3)\n0.05 m 格子、膨張 0.35 m\n1 s ごとに再計画", "#e4f5ec"),
     ]
     for x, y, w, h, text, fc in boxes:
         ax.add_patch(FancyBboxPatch((x, y), w, h, boxstyle="round,pad=0.05,rounding_size=0.15", fc=fc, ec="#333333", lw=1.5))
-        ax.text(x + w / 2, y + h / 2, text, ha="center", va="center", fontsize=15, linespacing=1.4)
+        ax.text(x + w / 2, y + h / 2, text, ha="center", va="center", fontsize=15 if "A*" not in text else 13, linespacing=1.4)
 
     def arrow(p, q, text=None, color="#333333"):
         ax.add_patch(FancyArrowPatch(p, q, arrowstyle="-|>", mutation_scale=22, lw=2, color=color))
@@ -68,15 +70,19 @@ def arch():
     arrow((10.85, 4.6), (10.85, 3.6), "50 Hz")
     arrow((10.85, 2.3), (10.85, 1.6))
     ax.text(11.0, 1.85, "12 関節目標角", ha="left", fontsize=12)
-    arrow((8.9, 1.1), (7.5, 2.4), None, "#c0504d")
+    arrow((8.9, 1.1), (7.6, 2.4), None, "#c0504d")
     ax.text(8.55, 1.45, "レイキャスト", ha="left", fontsize=12, color="#c0504d")
-    arrow((5.35, 3.6), (7.0, 4.6), None, "#c0504d")
-    ax.text(5.5, 4.25, "セクタ距離", ha="left", fontsize=12, color="#c0504d")
-    arrow((8.9, 0.75), (1.55, 0.75), "", "#777777")
-    ax.text(5.0, 0.95, "姿勢 (x, y, yaw)", ha="center", fontsize=12, color="#777777")
-    arrow((1.55, 0.75), (1.55, 4.6), "", "#777777")
-    ax.text(0.55, 6.55, "構成: 実機 Go2 の「LiDAR → ナビ → 速度指令 → 歩行」と同じ層構造", fontsize=18, weight="bold")
-    ax.text(0.55, 6.15, "学習は歩行方策だけ。ナビ層は決定的・説明可能(地図なし、障害物位置は未使用)", fontsize=14, color="#444444")
+    arrow((5.8, 3.6), (7.0, 4.6), None, "#c0504d")
+    ax.text(5.95, 4.2, "セクタ距離", ha="left", fontsize=12, color="#c0504d")
+    arrow((3.6, 2.6), (3.3, 2.6), None, "#2e8b57")
+    ax.text(3.45, 2.2, "ヒット点", ha="center", fontsize=10, color="#2e8b57")
+    arrow((1.75, 3.6), (3.6, 4.6), None, "#2e8b57")
+    ax.text(1.3, 4.2, "ローカル目標 (0.8 m 先)", ha="left", fontsize=12, color="#2e8b57")
+    arrow((8.9, 0.75), (0.1, 0.75), "", "#777777")
+    ax.text(5.0, 0.95, "姿勢 (x, y, yaw)(真の姿勢、SLAM なし)", ha="center", fontsize=12, color="#777777")
+    arrow((0.1, 0.75), (0.1, 4.6), "", "#777777")
+    ax.text(0.55, 6.55, "構成: 実機 Go2 の「自己位置 → 地図・計画 → 速度指令 → 歩行」と同じ 3 層構造", fontsize=18, weight="bold")
+    ax.text(0.55, 6.15, "学習は歩行方策だけ。ナビ層は決定的・説明可能。v1/v2 は地図なしの反応的回避、v3 は占有格子 + A* の大域計画", fontsize=14, color="#444444")
     fig.savefig("figs/arch.png", dpi=100, facecolor="white")
     print("wrote figs/arch.png")
 
@@ -141,7 +147,9 @@ def result_50(half=False):
     df["avoid_version"] = df["avoid_version"].fillna("")
     conds = [("回避なし", df[df.avoid == 0]), ("回避 v1", df[(df.avoid == 1) & (df.avoid_version == "v1")]),
              ("回避 v2", df[(df.avoid == 1) & (df.avoid_version == "v2")])]
-    colors = ["#2a78d6", "#eb6834", "#eda100"]
+    if (df.avoid_version == "v3").any():
+        conds.append(("v3 地図+A*", df[(df.avoid == 1) & (df.avoid_version == "v3")]))
+    colors = ["#2a78d6", "#eb6834", "#eda100", "#1baf7a"]
     fig, axes = plt.subplots(3, 1, figsize=(6.4, 7.2), dpi=100) if half else plt.subplots(1, 3, figsize=(12.8, 7.2), dpi=100)
     for ax, (key, title) in zip(axes, [("success", "成功率(4/4・転倒なし・接触なし)"), ("contact", "接触率(物理接触)"), ("time", "所要時間 [s](成功分の平均)")]):
         for i, (name, g) in enumerate(conds):
@@ -157,8 +165,8 @@ def result_50(half=False):
                 ax.bar(i, v, 0.6, color=colors[i])
                 ax.errorbar(i, v, yerr=[[v - lo], [hi - v]], fmt="none", ecolor="#333333", capsize=5, lw=1.5)
                 ax.text(i, min(hi, 1.0) + 0.03, f"{v:.0%}", ha="center", va="bottom", fontsize=15)
-        ax.set_xticks(range(3))
-        ax.set_xticklabels([c[0] for c in conds], fontsize=15)
+        ax.set_xticks(range(len(conds)))
+        ax.set_xticklabels([c[0] for c in conds], fontsize=14 if len(conds) <= 3 else 12)
         ax.set_title(title, fontsize=15)
         ax.tick_params(axis="y", labelsize=13)
         if key != "time":
@@ -173,13 +181,13 @@ def result_50(half=False):
             ax.set_title(ax.get_title(), fontsize=12)
             ax.tick_params(labelsize=11)
         axes[2].set_ylim(0, 42)
-        fig.suptitle("45 配置 × 3 条件(誤差棒 = Wilson 95% CI)", fontsize=13)
+        fig.suptitle(f"45 配置 × {len(conds)} 条件(誤差棒 = Wilson 95% CI)", fontsize=13)
         fig.tight_layout(rect=(0, 0, 1, 0.95))
         fig.savefig("figs/result_50_half.png", dpi=100, facecolor="white")
         print("wrote figs/result_50_half.png")
         return
-    fig.suptitle("定量評価: 障害物あり 45 配置 × 3 条件(拡張方策、60 s 上限、誤差棒 = Wilson 95% CI)", fontsize=17)
-    fig.text(0.5, 0.015, "回避なし → 回避あり: 成功 9% → 91%、接触 91% → 0%(McNemar p < 0.0001)。v1 → v2: 成功 91% → 96%(p = 0.69)、所要 中央値 +1.1 s",
+    fig.suptitle(f"定量評価: 障害物あり 45 配置 × {len(conds)} 条件(拡張方策、60 s 上限、誤差棒 = Wilson 95% CI)", fontsize=17)
+    fig.text(0.5, 0.015, "回避なし → v1: 成功 9% → 91%、接触 91% → 0%(McNemar p < 0.0001)。v3 は 100%、所要 24.2 s は v1/v2 より短い(p < 0.0001)",
              ha="center", fontsize=13, color="#444444")
     fig.tight_layout(rect=(0, 0.05, 1, 0.94))
     fig.savefig("figs/result_50.png", dpi=100, facecolor="white")
@@ -207,3 +215,5 @@ if __name__ == "__main__":
     result_50(half=True)
     pad_to_frame("results/t01_square_traj_compare.png", "figs/traj_compare.png")
     pad_to_frame("results/t03_traj_seed0.png", "figs/traj_t03_seed0.png")
+    if os.path.exists("results/t09_traj_seed28.png"):
+        pad_to_frame("results/t09_traj_seed28.png", "figs/traj_seed28.png", top=90)   # 帯(90 px)の下に置く

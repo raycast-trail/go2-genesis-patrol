@@ -82,6 +82,7 @@ def main():
     parser.add_argument("--foxglove", default="videos/raw/foxglove_seed10.mov")
     parser.add_argument("--v1-seed28-start", type=float, default=8.0, help="v1 seed28 の振動区間の開始秒")
     parser.add_argument("--v2-seed28-start", type=float, default=8.0)
+    parser.add_argument("--v3-seed28-start", type=float, default=9.7, help="v3 seed28: Box 最接近(12.7 s)の 3 s 前")
     args = parser.parse_args()
     R = args.raw
     C = "figs/cards"
@@ -105,8 +106,13 @@ def main():
         seq.append(("9 Foxglove 静止画(6 s、収録なしの代替)", p))
     p = o("v1_28"); clip(f"{R}/v1_seed28_close.mp4", p, start=args.v1_seed28_start, dur=10, speed=2.0, banner=f"{C}/B10a.png"); seq.append(("10a v1 seed28(2 倍速)", p))
     p = o("v2_28"); clip(f"{R}/v2_seed28_close.mp4", p, start=args.v2_seed28_start, dur=10, speed=2.0, banner=f"{C}/B10b.png"); seq.append(("10b v2 seed28(2 倍速)", p))
-    p = o("C4"); side_by_side(f"{C}/C4h.png", "figs/result_50_half.png", 10, p); seq.append(("11 C4 + 結果", p))
-    p = o("C5"); still(f"{C}/C5.png", 5, p); seq.append(("12 C5", p))
+    if os.path.exists(f"{R}/v3_seed28_close.mp4"):
+        p = o("v3_28"); clip(f"{R}/v3_seed28_close.mp4", p, start=args.v3_seed28_start, dur=10, speed=2.0, banner=f"{C}/B10c.png"); seq.append(("10c v3 seed28(2 倍速)", p))
+    if os.path.exists("figs/traj_seed28.png"):
+        p = o("traj28"); still("figs/traj_seed28.png", 6, p + ".tmp.mp4"); clip(p + ".tmp.mp4", p, banner=f"{C}/B10d.png"); os.remove(p + ".tmp.mp4")
+        seq.append(("10d seed28 軌跡図(静止)", p))
+    p = o("C4"); side_by_side(f"{C}/C4h.png", "figs/result_50_half.png", 10, p); seq.append(("11 C4 + 結果(4 条件)", p))
+    p = o("C5"); still(f"{C}/C5.png", 7, p); seq.append(("12 C5", p))
     p = o("C6"); still(f"{C}/C6.png", 8, p); seq.append(("13 C6 まとめ", p))
 
     lst = os.path.join(tmp, "list.txt")
