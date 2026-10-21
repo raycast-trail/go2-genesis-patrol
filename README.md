@@ -36,6 +36,11 @@ python go2_patrol.py -e go2-patrol --ckpt 299 --waypoints square --seed 3 --avoi
 # 4. 定量評価(20 配置 × 4 条件)と集計
 python eval/run_eval.py --policies go2-walking:100,go2-patrol:299 --avoid both --seeds 0-19
 python eval/summarize.py
+
+# 5. 巡回ログを MCAP に書き出して Foxglove で 3D 表示(LiDAR 点群・軌跡・障害物・TF・指令)
+python go2_patrol.py -e go2-patrol --ckpt 299 --backend cpu --seed 10 --avoid --no-video --mcap results/mcap/t06_seed10.mcap
+#   Foxglove アプリ: Open local file → results/mcap/t06_seed10.mcap、Layout → Import → docs/foxglove_layout.json
+#   (3D パネルの表示フレームを world にする。Plot パネルは /nav/state.vx, .yaw_rate, .d_front)
 ```
 
 ## 構成

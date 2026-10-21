@@ -40,7 +40,7 @@ import genesis as gs
 from genesis.utils.geom import quat_to_xyz
 
 from go2_env import Go2Env
-from nav.lidar import make_lidar_cfg, read_scan, sector_min
+from nav.lidar import make_lidar_cfg, read_scan, read_scan_full, sector_min
 from nav.avoid import ObstacleAvoider
 from eval.scenes import make_obstacles, save_scene
 
@@ -87,10 +87,11 @@ class WaypointFollower:
 
 def run_patrol(exp_name, ckpt, seed=-1, avoid=True, waypoints="square", laps=1.0, max_time=60.0, out=None,
                camera=None, res=(1280, 720), fps=50, collision_dist=0.25, lidar_warmup=5, avoid_kwargs=None,
-               lidar_min_range=0.0, verbose=True):
+               lidar_min_range=0.0, verbose=True, mcap=None):
     """1 エピソードの巡回を実行して計測値の dict を返す(gs.init() 済みであること)。
 
     out=None なら録画しない(camera_cfg=None、T04 の評価用)。
+    mcap=PATH なら nav/mcap_logger.py で LiDAR・姿勢・軌跡・障害物・指令を MCAP に書く(Foxglove 用。既定 None)。
     戻り値: reached, max_laps_idx, end_reason, sim_s, wall_s, n_steps, n_collision, first_collision_t, n_contact,
             first_contact_t, n_raw_hit_steps, n_raw_hits, n_hits_after, path_length, min_lidar, n_placed, scene_meta,
             log(np.ndarray, 列は LOG_HEADER)
@@ -138,6 +139,13 @@ def run_patrol(exp_name, ckpt, seed=-1, avoid=True, waypoints="square", laps=1.0
     if verbose:
         print(f"[go2_patrol] avoid={'on ' + str(avoider.params()) if avoider else 'off'}")
 
+    mcap_logger = None
+    if mcap:
+        from nav.mcap_logger import McapLogger
+        os.makedirs(os.path.dirname(mcap) or ".", exist_ok=True)
+        mcap_logger = McapLogger(mcap, scene_meta["obstacles"], lidar_pos_offset=lidar_cfg["pos_offset"],
+                                 max_range=max_range)
+
     obs_dict = env.reset()
     if cam is not None:
         cam.start_recording(save_to_filename=out, fps=fps)
@@ -177,8 +185,9 @@ def run_patrol(exp_name, ckpt, seed=-1, avoid=True, waypoints="square", laps=1.0
                 cam.set_pose(pos=(pos[0] + 3.0, pos[1] - 3.0, 2.2), lookat=(pos[0], pos[1], 0.3))
             # LiDAR(着地後から使う)。ニアミス = 地面除去後の最小距離 < collision_dist
             min_dist, collision, raw_hits, hits = max_range, 0, 0, 0
+            raw, pts = None, None
             if n_steps >= lidar_warmup:
-                scan, raw = read_scan(env, return_raw=True)
+                scan, raw, pts = read_scan_full(env)
                 min_dist = float(scan.min())
                 min_lidar = min(min_lidar, min_dist)
                 raw_hits, hits = int(np.sum(raw < max_range)), int(np.sum(scan < max_range))
@@ -208,6 +217,14 @@ def run_patrol(exp_name, ckpt, seed=-1, avoid=True, waypoints="square", laps=1.0
             log.append((n_steps * env.dt, pos[0], pos[1], math.degrees(yaw), vx, wz, min_dist, collision, raw_hits, hits,
                         contact, vx_follow, wz_follow, av.get("d_front", np.inf), av.get("hit_lat", 0.0),
                         avoider.side if avoider is not None else 0))
+            if mcap_logger is not None:
+                # step 後の姿勢(LiDAR と同じ時刻)。Genesis の quat は (w, x, y, z)
+                bp = env.robot.get_pos()[0].cpu().numpy()
+                bq = env.robot.get_quat()[0].cpu().numpy()
+                hit_pts = pts[scan < max_range] if pts is not None else np.zeros((0, 3))
+                mcap_logger.log_step(n_steps * env.dt, bp, bq, raw, scan if raw is not None else None, hit_pts, (vx, wz),
+                                     dict(d_front=av.get("d_front", np.inf), avoid_side=avoider.side if avoider else 0,
+                                          committed=0, reached=reached, min_dist=min_dist, contact=contact))
             n_steps += 1
             if bool(dones[0]):
                 # 環境のエピソード上限によるリセット(time_outs)と転倒(pitch/roll 超過)を区別する
@@ -223,6 +240,14 @@ def run_patrol(exp_name, ckpt, seed=-1, avoid=True, waypoints="square", laps=1.0
     if cam is not None:
         cam.stop_recording()
     elapsed = time.time() - t0
+    mcap_stats = None
+    if mcap_logger is not None:
+        mcap_logger.close()
+        mcap_stats = mcap_logger.stats()
+        mcap_stats["bytes"] = os.path.getsize(mcap)
+        if verbose:
+            print(f"[go2_patrol] wrote {mcap}: {mcap_stats['bytes'] / 1e6:.1f} MB, {mcap_stats['steps']} steps, "
+                  f"{mcap_stats['points']} points, {mcap_stats['ms_per_step']:.2f} ms/step for logging")
     log = np.array(log)
     path_length = float(np.sum(np.hypot(np.diff(log[:, 1]), np.diff(log[:, 2])))) if len(log) > 1 else 0.0
     return dict(reached=reached, max_laps_idx=max_laps_idx, end_reason=end_reason, sim_s=n_steps * env.dt,
@@ -230,7 +255,7 @@ def run_patrol(exp_name, ckpt, seed=-1, avoid=True, waypoints="square", laps=1.0
                 n_contact=n_contact, first_contact_t=first_contact_t, n_raw_hit_steps=n_raw_hit_steps,
                 n_raw_hits=n_raw_hits, n_hits_after=n_hits_after, path_length=path_length, min_lidar=min_lidar,
                 n_placed=scene_meta["n_placed"], scene_meta=scene_meta, log=log, lidar_steps=max(n_steps - lidar_warmup, 0),
-                avoid_params=avoider.params() if avoider else None)
+                avoid_params=avoider.params() if avoider else None, mcap_stats=mcap_stats)
 
 
 LOG_HEADER = "t,x,y,yaw_deg,cmd_vx,cmd_yaw,min_dist,collision,raw_hits,hits,contact,follow_vx,follow_yaw,d_front,hit_lat,avoid_side"
@@ -244,6 +269,7 @@ def main():
     parser.add_argument("--ckpt", type=int, default=299)
     parser.add_argument("--out", type=str, default="go2_patrol.mp4")
     parser.add_argument("--no-video", action="store_true", help="録画しない(camera なし。評価用、速い)")
+    parser.add_argument("--mcap", type=str, default=None, help="指定時のみ MCAP(Foxglove 用)を書く。例: results/mcap/run.mcap")
     parser.add_argument("--backend", choices=["gpu", "cpu"], default="gpu")
     parser.add_argument("--waypoints", choices=list(WAYPOINT_SETS), default="square")
     parser.add_argument("--laps", type=float, default=1.0, help="周回数(square/circle)。line では無視")
@@ -275,7 +301,7 @@ def main():
     r = run_patrol(args.exp_name, args.ckpt, seed=args.seed, avoid=args.avoid, waypoints=args.waypoints, laps=args.laps,
                    max_time=args.max_time, out=None if args.no_video else args.out, camera=args.camera, res=args.res,
                    fps=args.fps, collision_dist=args.collision_dist, lidar_warmup=args.lidar_warmup,
-                   avoid_kwargs=avoid_kwargs, lidar_min_range=args.lidar_min_range)
+                   avoid_kwargs=avoid_kwargs, lidar_min_range=args.lidar_min_range, mcap=args.mcap)
     log_path = os.path.splitext(args.out)[0] + "_log.csv"
     np.savetxt(log_path, r["log"], delimiter=",", fmt="%.4f", header=LOG_HEADER, comments="")
     print(f"[go2_patrol] wrote {'(no video) ' + log_path if args.no_video else args.out}: {r['n_steps']} steps, "

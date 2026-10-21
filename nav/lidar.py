@@ -39,19 +39,27 @@ def make_lidar_cfg(**overrides):
     return cfg
 
 
-def read_scan(env, env_idx=0, ground_z=GROUND_Z, return_raw=False):
-    """距離配列 (72,) を返す。地面除去と min_range 未満の除去を行う。return_raw=True なら (scan, raw) を返す。"""
+def read_scan_full(env, env_idx=0, ground_z=GROUND_Z):
+    """(scan, raw, points) を返す。scan は地面除去・min_range 除去後の距離 (72,)、raw は生の距離 (72,)、
+    points はヒット点の world 座標 (72, 3)(return_points=False のときは None)。"""
     r = env.lidar.read()
     max_range = float(env.lidar_cfg.get("max_range", 20.0))
     min_range = float(env.lidar_cfg.get("min_range", 0.0))
     # read() の戻り値は NamedTuple(points, distances)。np.asarray() に直接渡すと shape 不整合になるので個別に取り出す
     d = torch.as_tensor(r.distances).reshape(env.num_envs, N_RAYS)[env_idx].detach().cpu().numpy().astype(np.float64)
     scan = d.copy()
+    pts = None
     if r.points is not None:
         pts = torch.as_tensor(r.points).reshape(env.num_envs, N_RAYS, 3)[env_idx].detach().cpu().numpy()
         hit = scan < max_range
         scan[hit & (pts[:, 2] < ground_z)] = max_range
     scan[scan < min_range] = max_range
+    return scan, d, pts
+
+
+def read_scan(env, env_idx=0, ground_z=GROUND_Z, return_raw=False):
+    """距離配列 (72,) を返す。地面除去と min_range 未満の除去を行う。return_raw=True なら (scan, raw) を返す。"""
+    scan, d, _ = read_scan_full(env, env_idx=env_idx, ground_z=ground_z)
     return (scan, d) if return_raw else scan
 
 

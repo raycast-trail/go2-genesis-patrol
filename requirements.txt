@@ -6,3 +6,4 @@ tensorboard
 numpy
 pandas
 matplotlib
+foxglove-sdk>=0.30   # 巡回ログの MCAP 書き出し(go2_patrol.py --mcap、Foxglove で 3D 表示)
