@@ -43,10 +43,12 @@ def parse_seeds(s):
 
 
 def load_done(path):
+    """済みの (policy, avoid, seed, avoid_version) の集合。回避なしは avoid_version を '' として扱う"""
     if not os.path.exists(path):
         return set()
     with open(path, encoding="utf-8") as f:
-        return {(r["policy"], int(r["avoid"]), int(r["seed"])) for r in csv.DictReader(f)}
+        return {(r["policy"], int(r["avoid"]), int(r["seed"]), r.get("avoid_version", "") if int(r["avoid"]) else "")
+                for r in csv.DictReader(f)}
 
 
 def main():
@@ -62,6 +64,7 @@ def main():
     parser.add_argument("--avoid-version", choices=["v1", "v2"], default="v2", help="回避則(nav/avoid.py)。T04 は v1")
     parser.add_argument("--t-commit", type=float, default=2.0)
     parser.add_argument("--t-clear", type=float, default=1.0)
+    parser.add_argument("--camera-only", action="store_true", help="カメラを作るが録画しない(T07 の再現性対策)")
     args = parser.parse_args()
 
     policies = [(p.split(":")[0], int(p.split(":")[1])) for p in args.policies.split(",")]
@@ -69,7 +72,7 @@ def main():
     seeds = parse_seeds(args.seeds)
     done = load_done(args.out)
     todo = [(seed, pol, ck, av) for seed in seeds for pol, ck in policies for av in avoids
-            if (pol, av, seed) not in done]
+            if (pol, av, seed, args.avoid_version if av else "") not in done]
     print(f"[run_eval] {len(todo)} episodes to run ({len(done)} already in {args.out}); avoid_version={args.avoid_version}")
     if not todo:
         return
@@ -84,7 +87,7 @@ def main():
         t0 = time.time()
         r = run_patrol(pol, ck, seed=scene_seed, avoid=bool(av), waypoints=args.waypoints, max_time=args.max_time,
                        out=None, verbose=False, avoid_version=args.avoid_version,
-                       avoid_kwargs=dict(T_commit=args.t_commit, T_clear=args.t_clear))
+                       avoid_kwargs=dict(T_commit=args.t_commit, T_clear=args.t_clear), camera_only=args.camera_only)
         wall = time.time() - t0
         fell = int(r["end_reason"] == "fell")
         contact = int(r["n_contact"] > 0)

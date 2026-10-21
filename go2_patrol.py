@@ -87,11 +87,12 @@ class WaypointFollower:
 
 def run_patrol(exp_name, ckpt, seed=-1, avoid=True, waypoints="square", laps=1.0, max_time=60.0, out=None,
                camera=None, res=(1280, 720), fps=50, collision_dist=0.25, lidar_warmup=5, avoid_kwargs=None,
-               lidar_min_range=0.0, verbose=True, mcap=None, avoid_version="v2"):
+               lidar_min_range=0.0, verbose=True, mcap=None, avoid_version="v2", camera_only=False):
     """1 エピソードの巡回を実行して計測値の dict を返す(gs.init() 済みであること)。
 
     out=None なら録画しない(camera_cfg=None、T04 の評価用)。
     mcap=PATH なら nav/mcap_logger.py で LiDAR・姿勢・軌跡・障害物・指令を MCAP に書く(Foxglove 用。既定 None)。
+    camera_only=True なら out=None でもカメラを作る(録画はしない)。T07 の再現性の切り分け用。
     戻り値: reached, max_laps_idx, end_reason, sim_s, wall_s, n_steps, n_collision, first_collision_t, n_contact,
             first_contact_t, n_raw_hit_steps, n_raw_hits, n_hits_after, path_length, min_lidar, n_placed, scene_meta,
             log(np.ndarray, 列は LOG_HEADER)
@@ -114,7 +115,7 @@ def run_patrol(exp_name, ckpt, seed=-1, avoid=True, waypoints="square", laps=1.0
         if verbose:
             print(f"[go2_patrol] scene seed={seed}: {scene_meta['n_placed']} obstacles -> {scene_file}")
     camera_mode = camera or ("overhead" if seed >= 0 else "follow")
-    if out is None:
+    if out is None and not camera_only:
         camera_cfg = None
     elif camera_mode == "overhead":
         camera_cfg = dict(res=tuple(res), pos=(1.0, -4.0, 4.0), lookat=(1.0, 1.0, 0.0), fov=50, GUI=False)
@@ -126,7 +127,7 @@ def run_patrol(exp_name, ckpt, seed=-1, avoid=True, waypoints="square", laps=1.0
                  command_cfg=command_cfg, show_viewer=False, camera_cfg=camera_cfg,
                  lidar_cfg=lidar_cfg, obstacles=obstacles)
     max_range = lidar_cfg["max_range"]
-    cam = env.cam
+    cam = env.cam if out is not None else None     # camera_only のときは env.cam はあるが録画しない
 
     runner = OnPolicyRunner(env, train_cfg, log_dir, device=gs.device)
     runner.load(os.path.join(log_dir, f"model_{ckpt}.pt"))
@@ -272,6 +273,7 @@ def main():
     parser.add_argument("--out", type=str, default="go2_patrol.mp4")
     parser.add_argument("--no-video", action="store_true", help="録画しない(camera なし。評価用、速い)")
     parser.add_argument("--mcap", type=str, default=None, help="指定時のみ MCAP(Foxglove 用)を書く。例: results/mcap/run.mcap")
+    parser.add_argument("--camera-only", action="store_true", help="--no-video でもカメラを作る(録画しない)。再現性の切り分け用")
     parser.add_argument("--backend", choices=["gpu", "cpu"], default="gpu")
     parser.add_argument("--waypoints", choices=list(WAYPOINT_SETS), default="square")
     parser.add_argument("--laps", type=float, default=1.0, help="周回数(square/circle)。line では無視")
@@ -308,7 +310,7 @@ def main():
                    max_time=args.max_time, out=None if args.no_video else args.out, camera=args.camera, res=args.res,
                    fps=args.fps, collision_dist=args.collision_dist, lidar_warmup=args.lidar_warmup,
                    avoid_kwargs=avoid_kwargs, lidar_min_range=args.lidar_min_range, mcap=args.mcap,
-                   avoid_version=args.avoid_version)
+                   avoid_version=args.avoid_version, camera_only=args.camera_only)
     log_path = os.path.splitext(args.out)[0] + "_log.csv"
     np.savetxt(log_path, r["log"], delimiter=",", fmt="%.4f", header=LOG_HEADER, comments="")
     print(f"[go2_patrol] wrote {'(no video) ' + log_path if args.no_video else args.out}: {r['n_steps']} steps, "

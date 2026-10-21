@@ -1,0 +1,16 @@
+cond,desc,rep,reached,end_reason,sim_s,steps,contact_steps,path_length_m,wall_s
+a,no-video (separate process),1,3,timeout,60.0,3000,0,15.55,29.6
+a,no-video (separate process),2,4,completed,42.4,2121,0,10.76,25.7
+a,no-video (separate process),3,2,timeout,60.0,3000,0,13.59,28.0
+b,video (overhead),1,2,timeout,60.0,3000,0,13.54,47.3
+b,video (overhead),2,4,completed,43.1,2154,0,10.86,39.5
+b,video (overhead),3,4,completed,42.7,2136,0,10.7,41.8
+c,video + mcap,1,1,timeout,60.0,3000,0,13.74,49.0
+c,video + mcap,2,4,completed,43.1,2154,0,10.83,38.7
+c,video + mcap,3,4,completed,43.3,2165,0,10.83,39.9
+d,no-video + camera-only,1,4,completed,49.3,2463,0,13.08,25.1
+d,no-video + camera-only,2,2,timeout,60.0,3000,0,14.09,26.8
+d,no-video + camera-only,3,1,timeout,60.0,3000,0,13.65,27.8
+e,"no-video, same process x3",1,4,completed,38.92,1946,0,10.783,18.0
+e,"no-video, same process x3",2,4,completed,46.34,2317,0,12.75,9.0
+e,"no-video, same process x3",3,4,completed,43.78,2189,0,10.914,8.8

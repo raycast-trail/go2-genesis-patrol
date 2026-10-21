@@ -257,6 +257,169 @@ def compare_main(args):
     plot_compare(res_list, os.path.join(args.out_dir, "summary.png"))
 
 
+# ---------------------------------------------------------------------------------------------------------------
+# 3 条件比較(T07): v1 回避なし / v1 回避あり / v2 回避あり、拡張方策、障害物あり配置
+# ---------------------------------------------------------------------------------------------------------------
+def sign_test(n_pos, n_neg):
+    """符号検定(両側、正確)。差が 0 のものは除く"""
+    return mcnemar_exact(n_pos, n_neg)
+
+
+def wilcoxon_signed_rank(diffs):
+    """Wilcoxon 符号順位検定(正規近似、タイ補正、n ≥ 10 目安)。戻り値 (W+, z, p 両側)。差 0 は除く"""
+    d = np.asarray([x for x in diffs if x != 0.0], dtype=float)
+    n = len(d)
+    if n < 5:
+        return float("nan"), float("nan"), float("nan")
+    absd = np.abs(d)
+    order = np.argsort(absd)
+    ranks = np.empty(n)
+    # 平均順位(タイ)
+    sorted_abs = absd[order]
+    i = 0
+    while i < n:
+        j = i
+        while j + 1 < n and sorted_abs[j + 1] == sorted_abs[i]:
+            j += 1
+        ranks[order[i:j + 1]] = (i + j + 2) / 2.0
+        i = j + 1
+    w_plus = float(ranks[d > 0].sum())
+    mean = n * (n + 1) / 4.0
+    # タイ補正
+    _, counts = np.unique(sorted_abs, return_counts=True)
+    tie = float(np.sum(counts ** 3 - counts))
+    var = n * (n + 1) * (2 * n + 1) / 24.0 - tie / 48.0
+    z = (w_plus - mean) / math.sqrt(var) if var > 0 else float("nan")
+    p = math.erfc(abs(z) / math.sqrt(2)) if not math.isnan(z) else float("nan")
+    return w_plus, z, p
+
+
+def _parse_range(s):
+    out = []
+    for part in s.split(","):
+        if "-" in part:
+            a, b = part.split("-")
+            out.extend(range(int(a), int(b) + 1))
+        else:
+            out.append(int(part))
+    return out
+
+
+def compare3_main(args):
+    df = pd.read_csv(args.compare3)
+    seeds = _parse_range(args.scenes)
+    df = df[(df.policy == "go2-patrol") & (df.seed.isin(seeds))].copy()
+    if "avoid_version" not in df.columns:
+        df["avoid_version"] = "v1"
+    df["avoid_version"] = df["avoid_version"].fillna("")
+    conds = {
+        "v1 回避なし": df[df.avoid == 0],
+        "v1 回避あり": df[(df.avoid == 1) & (df.avoid_version == "v1")],
+        "v2 回避あり": df[(df.avoid == 1) & (df.avoid_version == "v2")],
+    }
+    md = [f"## 3 条件の集計(拡張方策、障害物あり配置 seed {args.scenes}、60 s 上限)\n",
+          "| 条件 | n | 成功率 [95% CI] | 接触率 [95% CI] | ニアミス率 | 転倒 | 平均到達 | 所要 [s](成功分) | 経路効率(成功分) |",
+          "|---|---|---|---|---|---|---|---|---|"]
+    stats = {}
+    for name, g in conds.items():
+        n = len(g)
+        ks, kc = int(g.success.sum()), int(g.contact.sum())
+        succ = g[g.success == 1]
+        cis, cic = wilson_ci(ks, n), wilson_ci(kc, n)
+        t = succ.time_to_complete.astype(float).mean() if len(succ) else float("nan")
+        e = succ.path_efficiency.astype(float).mean() if len(succ) else float("nan")
+        stats[name] = dict(n=n, ks=ks, kc=kc, rate_s=ks / n if n else float("nan"), rate_c=kc / n if n else float("nan"),
+                           ci_s=cis, ci_c=cic, time=t, eff=e)
+        md.append(f"| {name} | {n} | {ks}/{n} = {ks / n:.0%} [{cis[0]:.0%}–{cis[1]:.0%}] | {kc}/{n} = {kc / n:.0%} "
+                  f"[{cic[0]:.0%}–{cic[1]:.0%}] | {g.near_miss.mean():.0%} | {int(g.fell.sum())} | {g.reached.mean():.2f} | "
+                  f"{t:.1f} | {e:.2f} |")
+    # McNemar
+    def paired(a, b):
+        m = a[["seed", "success", "contact", "sim_s", "reached", "end_reason"]].merge(
+            b[["seed", "success", "contact", "sim_s", "reached", "end_reason"]], on="seed", suffixes=("_a", "_b"))
+        return m
+    md.append("\n## 対応あり比較(同じ seed)\n")
+    pairs = [("v1 回避なし", "v1 回避あり"), ("v1 回避あり", "v2 回避あり")]
+    for la, lb in pairs:
+        m = paired(conds[la], conds[lb])
+        for metric, mname in [("success", "成功"), ("contact", "接触")]:
+            xa, xb = m[f"{metric}_a"].astype(int), m[f"{metric}_b"].astype(int)
+            b_only, c_only = int(((xa == 1) & (xb == 0)).sum()), int(((xa == 0) & (xb == 1)).sum())
+            md.append(f"- **{mname}** {la} vs {lb}(n = {len(m)}): {la} のみ {b_only}、{lb} のみ {c_only} → "
+                      f"McNemar 正確検定 p = {mcnemar_exact(b_only, c_only):.4f}")
+    # 所要時間 v1 あり vs v2 あり
+    m = paired(conds["v1 回避あり"], conds["v2 回避あり"])
+    both = m[(m.success_a == 1) & (m.success_b == 1)]
+    diffs = (both.sim_s_b - both.sim_s_a).to_numpy()
+    n_pos, n_neg = int((diffs > 0.5).sum()), int((diffs < -0.5).sum())
+    w, z, p_w = wilcoxon_signed_rank(diffs)
+    md.append(f"\n## 所要時間: v1 回避あり vs v2 回避あり(両方成功した {len(both)} 配置)\n")
+    md.append(f"- v1 平均 {both.sim_s_a.mean():.1f} s、v2 平均 {both.sim_s_b.mean():.1f} s。差(v2 − v1)の中央値 {np.median(diffs):+.1f} s、"
+              f"平均 {diffs.mean():+.1f} s、最小 {diffs.min():+.1f} s、最大 {diffs.max():+.1f} s")
+    md.append(f"- v2 が 0.5 s 以上速い配置 {n_neg}、遅い配置 {n_pos}、±0.5 s 以内 {len(diffs) - n_pos - n_neg} → "
+              f"符号検定 p = {sign_test(n_pos, n_neg):.4f}")
+    md.append(f"- Wilcoxon 符号順位検定(正規近似、タイ補正): W+ = {w:.0f}, z = {z:+.2f}, p = {p_w:.4f}")
+    # 失敗一覧
+    md.append("\n## 失敗配置の一覧\n")
+    md.append("| 条件 | seed | 到達 | 終了理由 | 接触ステップ | 所要 [s] |")
+    md.append("|---|---|---|---|---|---|")
+    for name, g in conds.items():
+        for _, r in g[g.success == 0].sort_values("seed").iterrows():
+            md.append(f"| {name} | {int(r.seed)} | {int(r.reached)}/4 | {r.end_reason} | {int(r.contact_steps)} | {r.sim_s:.1f} |")
+    v1f_v2s = m[(m.success_a == 0) & (m.success_b == 1)].seed.tolist()
+    v1s_v2f = m[(m.success_a == 1) & (m.success_b == 0)].seed.tolist()
+    md.append(f"\n- v1 で失敗し v2 で成功: {v1f_v2s}\n- v1 で成功し v2 で失敗: {v1s_v2f}")
+    text = "\n".join(md)
+    os.makedirs(args.out_dir, exist_ok=True)
+    with open(os.path.join(args.out_dir, "summary.md"), "w", encoding="utf-8") as f:
+        f.write(text + "\n")
+    pd.DataFrame([dict(cond=k, **{kk: (vv if not isinstance(vv, tuple) else f"{vv[0]:.3f}-{vv[1]:.3f}") for kk, vv in v.items()})
+                  for k, v in stats.items()]).to_csv(os.path.join(args.out_dir, "summary.csv"), index=False)
+    print(text)
+    # 図: 成功率・接触率・所要時間
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    labels = ["v1\navoid off", "v1\navoid on", "v2\navoid on"]
+    colors = ["#2a78d6", "#eb6834", "#eda100"]
+    fig, axes = plt.subplots(1, 3, figsize=(13, 4.4))
+    for ax, (key, title) in zip(axes, [("rate_s", "Success rate"), ("rate_c", "Contact rate"), ("time", "Mean time to complete [s]")]):
+        for i, (name, st) in enumerate(stats.items()):
+            v = st[key]
+            ax.bar(i, v, 0.6, color=colors[i])
+            if key != "time":
+                lo, hi = st["ci_s"] if key == "rate_s" else st["ci_c"]
+                ax.errorbar(i, v, yerr=[[v - lo], [hi - v]], fmt="none", ecolor="#333333", capsize=4, lw=1)
+                ax.text(i, min(hi, 1.0) + 0.03, f"{v:.0%}", ha="center", va="bottom", fontsize=9, color="#333333")
+            elif not np.isnan(v):
+                ax.text(i, v + 0.5, f"{v:.1f}", ha="center", va="bottom", fontsize=9, color="#333333")
+        ax.set_xticks(range(3))
+        ax.set_xticklabels(labels, fontsize=9)
+        ax.set_title(title, fontsize=11)
+        if key != "time":
+            ax.set_ylim(0, 1.18)
+            ax.set_yticks([0, 0.25, 0.5, 0.75, 1.0])
+            ax.set_yticklabels(["0%", "25%", "50%", "75%", "100%"])
+        ax.grid(axis="y", alpha=0.25)
+        for sp in ["top", "right"]:
+            ax.spines[sp].set_visible(False)
+    n0 = stats["v1 回避なし"]["n"]
+    fig.suptitle(f"Patrol policy, {n0} obstacle scenes (seeds {args.scenes}), 60 s limit. Error bars: Wilson 95% CI", fontsize=11)
+    fig.tight_layout()
+    fig.savefig(os.path.join(args.out_dir, "summary.png"), dpi=150, bbox_inches="tight")
+    fig2, ax2 = plt.subplots(figsize=(6, 3.6))
+    ax2.hist(diffs, bins=np.arange(-35, 36, 5), color="#eda100", edgecolor="white")
+    ax2.axvline(0, color="#333333", lw=1)
+    ax2.set_xlabel("time v2 - v1 [s] (both succeeded)")
+    ax2.set_ylabel("scenes")
+    ax2.set_title(f"Time difference v2 - v1 (n = {len(diffs)}, median {np.median(diffs):+.1f} s)", fontsize=10)
+    for sp in ["top", "right"]:
+        ax2.spines[sp].set_visible(False)
+    fig2.tight_layout()
+    fig2.savefig(os.path.join(args.out_dir, "time_diff_hist.png"), dpi=150)
+    print(f"[summarize] wrote {args.out_dir}/summary.png, time_diff_hist.png")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--episodes", type=str, default="results/eval/episodes.csv")
@@ -264,7 +427,13 @@ def main():
     parser.add_argument("--compare", type=str, nargs=2, default=None, metavar=("V1_CSV", "V2_CSV"),
                         help="v1 と v2 の episodes.csv を seed ごとに比較し、McNemar / Wilson CI を出す")
     parser.add_argument("--rerun", type=str, default=None, help="v1 回避ありの再実行 episodes.csv(再現性の計測)")
+    parser.add_argument("--compare3", type=str, default=None, metavar="CSV",
+                        help="1 つの episodes.csv 内の v1 回避なし / v1 回避あり / v2 回避あり を比較(T07)")
+    parser.add_argument("--scenes", type=str, default="5-49", help="--compare3 で使う seed 範囲")
     args = parser.parse_args()
+    if args.compare3:
+        compare3_main(args)
+        return
     if args.compare:
         compare_main(args)
         return
