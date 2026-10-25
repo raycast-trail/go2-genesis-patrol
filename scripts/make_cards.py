@@ -38,7 +38,7 @@ def card(name, title, lines=(), footer=None, title_size=54, line_size=36, accent
         y += 30
         for i, t in enumerate(lines):
             col = ACC if (accent_first and i == 0) else SUB
-            for tt in wrap(d, t, font(ls), width):
+            for tt in (x for seg in t.split("\n") for x in wrap(d, seg, font(ls), width)):
                 d.text((80, y), tt, font=font(ls), fill=col)
                 y += ls + 22
         if footer:
@@ -72,13 +72,13 @@ def half_card(name, title, lines=(), title_size=38, line_size=27, accent_first=F
     d = ImageDraw.Draw(im)
     d.rectangle([0, 0, 12, H], fill=ACC)
     y = 90
-    for t in wrap(d, title, font(title_size), HW - 40 - MARGIN):
+    for t in (x for seg in title.split("\n") for x in wrap(d, seg, font(title_size), HW - 40 - MARGIN)):
         d.text((40, y), t, font=font(title_size), fill=FG)
         y += title_size + 12
     y += 26
     for i, t in enumerate(lines):
         col = ACC if (accent_first and i == 0) else SUB
-        for tt in wrap(d, t, font(line_size), HW - 40 - MARGIN):
+        for tt in (x for seg in t.split("\n") for x in wrap(d, seg, font(line_size), HW - 40 - MARGIN)):
             d.text((40, y), tt, font=font(line_size), fill=col)
             y += line_size + 10
         y += 12
@@ -116,19 +116,19 @@ card("C1", "1. 歩行方策を強化学習で獲得",
      ["4096 体並列・300 イテレーション・約 9 分(M1 Max, Metal)", "PPO(rsl-rl)、報酬: 速度指令への追従 + 姿勢の安定",
       "最終: エピソード長 991 / 1000、lin_vel 追従 0.97"])
 card("C2", "2. 速度指令への追従",
-     ["既定例題の方策は「前進 0.5 m/s」しか学んでいない → 旋回できず直進", "指令範囲を広げて再学習: vx 0〜0.8 m/s、ωz ±0.8 rad/s",
+     ["既定例題の方策は「前進 0.5 m/s」しか学んでいない\n→ 旋回できず直進", "指令範囲を広げて再学習: vx 0〜0.8 m/s、ωz ±0.8 rad/s",
       "→ 正方形の巡回経路を 16 s で 1 周"])
 card("C3", "3. 疑似 LiDAR(72 本)で反応的に回避",
-     ["Genesis の Raycaster を胴体に取付(5° 刻み、5 m)。地面除去あり", "進路幅 ±0.4 m の回廊に入った障害物だけに反応し、減速・旋回",
+     ["Genesis の Raycaster を胴体に取付(5° 刻み、5 m)。\n地面除去あり", "進路幅 ±0.4 m の回廊に入った障害物だけに反応し、減速・旋回",
       "地図なし・障害物位置は未使用(実機の LiDAR 回避と同じ入力)"])
-card("C4", "4. 45 配置で定量評価(障害物 3〜5 個を乱数配置)",
+card("C4", "4. 45 配置で定量評価\n(障害物 3〜5 個を乱数配置)",
      ["回避なし 9% → v1 91% → v2 96% → v3 100%(成功率)", "接触 91% → 0%(p < 0.0001)",
       "既定方策(前進のみ)は全条件で成功 0%"], accent_first=True)
 card("C5", "5. 比較: 地図なし(v1・v2)と地図あり(v3)",
      ["v1 反応的回避: 正面の障害物で振動(成功 91%)", "v2 + コミット区間: 抜けるが遠回り(96%、経路効率 0.81)",
       "v3 地図による経路計画: 速さと確実さを両立", "(100%、所要 24.2 s、経路効率 1.05)"])
 card("C6", "まとめ",
-     ["実機 Go2 の 自己位置 → 地図・計画 → 速度指令 → 歩行 と同じ 3 層構造をシムで再現(2D → 3D LiDAR)",
+     ["実機 Go2 と同じ層構造をシミュレーションで再現", "自己位置 → 地図・計画 → 速度指令 → 歩行(2D → 3D LiDAR)",
       "限界: 真の姿勢を使用(SLAM なし)、静止障害物、非決定性", "コード: github.com/raycast-trail/go2-genesis-patrol"], line_size=33)
 card("C7", "6. 3D LiDAR: 2D では見えない障害物",
      ["低い箱(0.15 m)と テーブルの天板(0.32〜0.36 m)は", "センサ面(0.44 m)の 2D スキャンに映らない",
@@ -147,14 +147,14 @@ banner("B12d", "3D: 低い箱とテーブルを地図に入れて迂回、完走
 banner("B12f", "Foxglove: 3D 点群(高さで色分け)が低い箱・天板・円柱をなぞる(seed 103)", speed=True)
 
 # 左右 2 分割用(640×720)
-half_card("C1h", "1. 歩行方策を強化学習で獲得",
+half_card("C1h", "1. 歩行方策を\n強化学習で獲得",
           ["4096 体並列・300 イテレーション・約 9 分(M1 Max, Metal)", "PPO(rsl-rl)。報酬: 速度指令への追従 + 姿勢の安定",
-           "最終: エピソード長 991 / 1000、lin_vel 追従 0.97"])
+           "最終: エピソード長 991 / 1000、\nlin_vel 追従 0.97"])
 half_card("C2h", "2. 速度指令への追従",
-          ["既定例題の方策は「前進 0.5 m/s」しか学んでいない → 旋回できず直進(橙)", "指令範囲を広げて再学習: vx 0〜0.8 m/s、ωz ±0.8 rad/s",
+          ["既定例題の方策は「前進 0.5 m/s」しか学んでいない → 旋回できず直進(橙)", "指令範囲を広げて再学習:\nvx 0〜0.8 m/s、ωz ±0.8 rad/s",
            "→ 正方形の巡回経路を 16 s で 1 周(青)"])
 half_card("C4h", "4. 45 配置で定量評価",
           ["障害物 3〜5 個を乱数配置、60 s 上限", "成功率: 回避なし 9% → v1 91%", "→ v2 96% → v3 100%",
            "接触 91% → 0%(p < 0.0001)", "既定方策(前進のみ)は全条件で 0%"])
 half_card("C8h", "3D LiDAR の効果",
-          ["30 配置(低い箱 + テーブル + 高い障害物)", "成功 3% → 100%、接触 97% → 0%(p < 0.0001)", "追加コスト +1 ms/step"])
+          ["30 配置\n(低い箱 + テーブル + 高い障害物)", "成功 3% → 100%、接触 97% → 0%\n(p < 0.0001)", "追加コスト +1 ms/step"])
