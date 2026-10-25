@@ -5,7 +5,7 @@
 **Unitree Go2 patrol in the Genesis simulator — RL locomotion + LiDAR navigation, evaluated on randomized scenes.**
 
 - A walking policy trained with PPO (4,096 parallel envs, 9 min on an M1 Max) follows velocity commands; a deterministic navigation stack on top of it patrols a square route.
-- Navigation was improved step by step — reactive avoidance (v1) → commit phase (v2) → occupancy grid + A* (v3) — raising patrol success from 9% to 100% with zero contacts over 45 randomized scenes.
+- The final navigation layer plans on an occupancy grid built from LiDAR and replans with A* every second; ablations against two map-free reactive controllers (v1, v2) show it reaches 100% patrol success with zero contacts over 45 randomized scenes (vs 9% without avoidance) and finishes 3–6 s faster (median, p < 0.0001).
 - A 3D pseudo-LiDAR projected onto the body-height band detects low boxes and table tops that a 2D scan misses (success 3% → 100% over 30 scenes).
 - Everything runs on a single Mac (Metal / CPU); logs export to MCAP for Foxglove.
 
@@ -13,7 +13,7 @@
 
 ---
 
-Unitree Go2 の歩行方策を Genesis 上で強化学習し、その上に疑似 LiDAR を使った巡回・障害物回避のナビゲーション層(反応的回避 v1 / v2、占有格子 + A* の大域計画 v3)を載せて、乱数配置の 45 シーンで定量評価したプロジェクト(Physical AI 2026 応用編1 最終課題)。実機 Go2 の「自己位置 → 地図・計画 → 速度指令 → 歩行」と同じ 3 層構造をシミュレーションで再現し、回避なし → 反応的回避 → 大域計画の順に成功率 9% → 91% → 100%、接触率 91% → 0% になることを対応ありの検定つきで示した。
+Unitree Go2 の歩行方策を Genesis 上で強化学習し、その上に疑似 LiDAR を使った巡回・障害物回避のナビゲーション層を載せて定量評価したプロジェクト(Physical AI 2026 応用編1 最終課題)。ナビゲーション層の中心は、LiDAR で描いた占有格子地図の上で A* により経路を引き直す地図による経路計画(v3)。乱数配置の 45 シーンで巡回成功率 9% → 100%、接触率 91% → 0%。地図の効果を切り分けるため、地図を持たない反応的回避 2 種(v1・v2)と比較した(対応ありの検定つき)。構成は実機 Go2 の「自己位置 → 地図・計画 → 速度指令 → 歩行」と同じ層構造。
 
 - 提出動画: `(提出後に URL を記載)`
 - レポート: `(提出後に URL を記載)`(`docs/report/` に PDF・HTML)
@@ -28,7 +28,7 @@ Unitree Go2 の歩行方策を Genesis 上で強化学習し、その上に疑�
 | 回避なし | 4/45 = 9% [4–21%] | 91% | 15.9 | 1.07 |
 | v1 反応的回避 | 41/45 = 91% [79–96%] | 0% | 31.6 | 1.00 |
 | v2 コミット区間つき | 43/45 = 96% [85–99%] | 0% | 31.7 | 0.81 |
-| **v3 占有格子 + A\*** | **45/45 = 100%** [92–100%] | **0%** | **24.2** | **1.05** |
+| **v3 地図による経路計画(占有格子 + A\*)** | **45/45 = 100%** [92–100%] | **0%** | **24.2** | **1.05** |
 
 ![v1 v2 v3](docs/media/v1_v2_v3_seed28.gif)
 
@@ -65,11 +65,15 @@ Unitree Go2 の歩行方策を Genesis 上で強化学習し、その上に疑�
 
 ![arch](figs/arch.png)
 
+最終形 v3 の層構造。学習するのは歩行方策だけで、地図・計画と速度指令は決定的な規則(図: `scripts/make_arch.py`)。
+
 | 層 | 実装 | 内容 |
 |---|---|---|
 | 歩行(学習) | `go2_train_patrol.py`, `go2_env.py` | Genesis 例題の Go2 環境で PPO(rsl-rl)。指令範囲を vx 0〜0.8 m/s、ωz ±0.8 rad/s に広げて 4096 env × 300 it(M1 Max / Metal で約 9 分)。方策は 50 Hz で 12 関節の目標角を出す |
 | 知覚 | `nav/lidar.py` | Genesis の Raycaster を胴体に取り付けた疑似 2D LiDAR(72 本 / 5° / 5 m)。地面除去とセクタ最小距離。`--lidar 3d` では 72 × 16 層の 3D 点群を高さで分類(地面 / 胴体帯 / 頭上 / 自機)し、胴体帯の点だけを 72 本に投影してナビ層に渡す(空き更新はレイが低い高さにある区間のみ) |
-| ナビゲーション | `nav/avoid.py`, `nav/grid_map.py`, `nav/planner.py`, `go2_patrol.py` | ウェイポイント追従(P 制御)の上に、下記の v1 / v2 / v3 を載せて速度指令 (vx, vy, ωz) を出す。姿勢は Genesis の真の値(SLAM なし) |
+| ナビゲーション | `nav/grid_map.py`, `nav/planner.py`, `nav/avoid.py`, `go2_patrol.py` | ウェイポイント追従の上で、v3(地図による経路計画)が速度指令 (vx, vy, ωz) を出す。比較用に地図なしの v1 / v2 に切り替えられる。姿勢は Genesis の真の値(SLAM なし) |
+
+### 比較: 地図なし(v1・v2)と地図あり(v3)
 
 | 回避則 | 仕組み | 特徴 |
 |---|---|---|
