@@ -2,6 +2,8 @@
 
 ![hero](docs/media/hero.gif)
 
+[![Full video](https://img.youtube.com/vi/uhSM8Q9onhM/hqdefault.jpg)](https://youtu.be/uhSM8Q9onhM)
+
 **Unitree Go2 patrol in the Genesis simulator — RL locomotion + LiDAR navigation, evaluated on randomized scenes.**
 
 - A walking policy trained with PPO (4,096 parallel envs, 9 min on an M1 Max) follows velocity commands; a deterministic navigation stack on top of it patrols a square route.
@@ -9,14 +11,14 @@
 - A 3D pseudo-LiDAR projected onto the body-height band detects low boxes and table tops that a 2D scan misses (success 3% → 100% over 30 scenes).
 - Everything runs on a single Mac (Metal / CPU); logs export to MCAP for Foxglove.
 
-📄 Report (Japanese): [docs/report/report.pdf](docs/report/report.pdf) · 🎬 Full video: (提出後に URL を記載)
+📄 Report (Japanese): [docs/report/report.pdf](docs/report/report.pdf) · 🎬 Full video: [YouTube](https://youtu.be/uhSM8Q9onhM)
 
 ---
 
 Unitree Go2 の歩行方策を Genesis 上で強化学習し、その上に疑似 LiDAR を使った巡回・障害物回避のナビゲーション層を載せて定量評価したプロジェクト(Physical AI 2026 応用編1 最終課題)。ナビゲーション層の中心は、LiDAR で描いた占有格子地図の上で A* により経路を引き直す地図による経路計画(v3)。乱数配置の 45 シーンで巡回成功率 9% → 100%、接触率 91% → 0%。地図の効果を切り分けるため、地図を持たない反応的回避 2 種(v1・v2)と比較した(対応ありの検定つき)。構成は実機 Go2 の「自己位置 → 地図・計画 → 速度指令 → 歩行」と同じ層構造。
 
-- 提出動画: `(提出後に URL を記載)`
-- レポート: `(提出後に URL を記載)`(`docs/report/` に PDF・HTML)
+- 提出動画: https://youtu.be/uhSM8Q9onhM
+- レポート: [docs/report/report.pdf](docs/report/report.pdf)(HTML も同じフォルダ)
 - 提出ファイル名・動画タイトル: `PAI最終課題_3164`
 
 ## 結果
