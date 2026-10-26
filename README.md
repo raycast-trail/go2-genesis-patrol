@@ -19,7 +19,7 @@ Unitree Go2 の歩行方策を Genesis 上で強化学習し、その上に疑�
 
 - 提出動画: https://youtu.be/uhSM8Q9onhM
 - レポート: [docs/report/report.pdf](docs/report/report.pdf)(HTML も同じフォルダ)
-- 提出ファイル名・動画タイトル: `PAI最終課題_3164`
+- 動画タイトル: `PAI最終課題_3164`(Omnicampus アカウント ID)
 
 ## 結果
 
