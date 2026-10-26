@@ -2,7 +2,7 @@
 
 新リポジトリ: https://github.com/raycast-trail/go2-genesis-patrol (public)
 
-> 注意: 履歴を `git filter-repo` で書き換えたため、`reports/01〜15` に書かれたコミットハッシュはすべて無効になっている(例: 旧 T15 は新履歴では `7357722`)。
+> 注意: 履歴を `git filter-repo` で書き換えたため、`reports/01〜15` に書かれたコミットハッシュはすべて無効になっている(例: 旧 T15 は新履歴では `<旧 SHA>`)。
 
 ## 受け入れ条件の判定
 
@@ -201,7 +201,7 @@ curl -s https://api.github.com/repos/raycast-trail/go2-genesis-patrol/contributo
 #     "login": "raycast-trail",
 curl -s "https://api.github.com/repos/raycast-trail/go2-genesis-patrol/commits?per_page=100" | grep -o '"email": *"[^"]*"' | sort -u
 # "email": "347854740+raycast-trail@users.noreply.github.com"
-git ls-remote origin main   # 574bacd… = ローカルの HEAD と一致
+git ls-remote origin main   # <旧 SHA>… = ローカルの HEAD と一致
 ```
 
 この報告書のコミットも同じ設定(raycast-trail)で push した(push の前だけ `gh auth switch -u raycast-trail`、終わったら元に戻した)。

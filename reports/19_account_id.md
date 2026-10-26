@@ -79,7 +79,7 @@ T16 以来、tasks/16 と reports/16〜18 に載せていた個人情報の検�
 
 ### 2. コミット
 
-`2c4b877`(書き換え後は `bd91a06`)T19: switch public identifier to Omnicampus account ID 3164 (video, report, docs)。作者は `git config --local` の raycast-trail。
+`<旧 SHA>`(書き換え後は `bd91a06`)T19: switch public identifier to Omnicampus account ID 3164 (video, report, docs)。作者は `git config --local` の raycast-trail。
 
 ### 3. 履歴の書き換え
 
@@ -121,7 +121,7 @@ git filter-repo --replace-text t19_replace.txt --replace-message t19_replace.txt
 ### 4. 作業フォルダの切り替え
 
 ```bash
-cp -a .git ../go2-genesis-patrol_backup_t18_git/.git     # 書き換え前の .git(HEAD 2c4b877)
+cp -a .git ../go2-genesis-patrol_backup_t18_git/.git     # 書き換え前の .git(HEAD <旧 SHA>)
 rm -rf .git && mv ../go2-genesis-patrol_anon/.git .git && rm -rf ../go2-genesis-patrol_anon
 git tag -d v1.0-submission            # 書き換えで移った旧タグ(付け直すので削除)
 git remote add origin https://raycast-trail@github.com/raycast-trail/go2-genesis-patrol.git
@@ -137,7 +137,7 @@ git config --local http.postBuffer 524288000
 ```bash
 gh auth switch -u raycast-trail
 git push origin :refs/tags/v1.0-submission     # - [deleted] v1.0-submission
-git push --force origin main                   # + 58b3b4f...bd91a06 main -> main (forced update)
+git push --force origin main                   # + <旧 SHA>...bd91a06 main -> main (forced update)
 git tag -a v1.0-submission -m "Physical AI 2026 応用編1 最終課題 提出版"
 git push origin v1.0-submission                # * [new tag]
 gh auth switch -u <元のアカウント>
@@ -160,7 +160,7 @@ force push は拒否されなかった(調整候補 2 は不要)。
 
 ## 未解決: 書き換え前のコミットが SHA の直接指定でまだ見える
 
-書き換え前の旧 main(`58b3b4f`)は、`https://api.github.com/repos/raycast-trail/go2-genesis-patrol/commits/58b3b4f…` で**まだ 200 が返る**(ログインなし)。GitHub は、どのブランチ・タグからも参照されなくなったコミットをすぐには削除しない。そのため、SHA を知っている人は、旧表記を含む T16〜T18 の版(旧 PDF・旧動画・括弧つきの検査パターン)を見られる。ブランチ・タグ・README・ファイル一覧からはたどれない。
+書き換え前の旧 main(`<旧 SHA>`)は、`https://api.github.com/repos/raycast-trail/go2-genesis-patrol/commits/<旧 SHA>…` で**まだ 200 が返る**(ログインなし)。GitHub は、どのブランチ・タグからも参照されなくなったコミットをすぐには削除しない。そのため、SHA を知っている人は、旧表記を含む T16〜T18 の版(旧 PDF・旧動画・括弧つきの検査パターン)を見られる。ブランチ・タグ・README・ファイル一覧からはたどれない。
 
 対処の候補(人間の判断):
 

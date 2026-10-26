@@ -7,7 +7,7 @@
 | C6 が 4 行で、単語の途中で折り返していない | ✅ | 下の画像。自動折り返しは 0 か所(下記の検出スクリプトで確認) |
 | 余白検査 OK、動画 60〜180 s、構成・長さは T16 と同じ | ✅ | `check_margins.py` all OK。動画 168.8 s(T16 と同じ)、ショット 21 個の構成も同じ |
 | 個人情報の検査 0 件 | ✅ | grep `none`、ffprobe のタグは encoder 等のみ |
-| push 済み、`gh` は元のアカウントに戻っている | ✅ | `6be23a7` を push(リモートの main と一致)。push の前だけ raycast-trail に切り替え、その後元に戻した |
+| push 済み、`gh` は元のアカウントに戻っている | ✅ | `<旧 SHA>` を push(リモートの main と一致)。push の前だけ raycast-trail に切り替え、その後元に戻した |
 | `reports/17_c6_fix.md`(日本語) | ✅ | 本ファイル |
 
 ## C6(修正後)
@@ -93,7 +93,7 @@ ffprobe -v error -show_entries format_tags:stream_tags -of compact "videos/final
 
 | コミット | 内容 | 作者 |
 |---|---|---|
-| `6be23a7` | T17: explicit line breaks in C6 and other cards, regenerate final video | raycast-trail(noreply) |
+| `<旧 SHA>` | T17: explicit line breaks in C6 and other cards, regenerate final video | raycast-trail(noreply) |
 | (本報告) | T17: report | raycast-trail(noreply) |
 
 ```bash

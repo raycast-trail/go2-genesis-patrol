@@ -1,7 +1,7 @@
 # T18 報告: 提出版の確定(YouTube URL の記入と v1.0-submission タグ)
 
 提出動画: https://youtu.be/uhSM8Q9onhM(タイトル `PAI最終課題_3164`)
-提出版のタグ: [`v1.0-submission`](https://github.com/raycast-trail/go2-genesis-patrol/releases/tag/v1.0-submission)(注釈つき。コミット `05fb3ed` を指す)
+提出版のタグ: [`v1.0-submission`](https://github.com/raycast-trail/go2-genesis-patrol/releases/tag/v1.0-submission)(注釈つき。コミット `<旧 SHA>` を指す)
 
 ## 受け入れ条件の判定
 
@@ -50,16 +50,16 @@ pdfinfo docs/report/report.pdf
 ## コミット・タグ・push
 
 ```bash
-git commit -m "T18: submission version (YouTube URL, report final)"      # 05fb3ed
+git commit -m "T18: submission version (YouTube URL, report final)"      # <旧 SHA>
 git tag -a v1.0-submission -m "Physical AI 2026 応用編1 最終課題 提出版"
 gh auth switch -u raycast-trail
-git push origin main                 # bbe77f7..05fb3ed
+git push origin main                 # <旧 SHA>..<旧 SHA>
 git push origin v1.0-submission      # * [new tag]
 gh auth switch -u <元のアカウント>
 ```
 
 - コミットの作者・コミッターとタグの tagger は、どれも `raycast-trail <347854740+raycast-trail@users.noreply.github.com>`
-- `git ls-remote origin`: `refs/heads/main` = `05fb3ed`、`refs/tags/v1.0-submission` = `47b636d`(タグのオブジェクト)→ `05fb3ed`
+- `git ls-remote origin`: `refs/heads/main` = `<旧 SHA>`、`refs/tags/v1.0-submission` = `<旧 SHA>`(タグのオブジェクト)→ `<旧 SHA>`
 - タグに含めたのは T18 の提出版のコミットまで。本報告はタグの後のコミットとして main に追加した(タスクの手順どおり、報告は確定後に書くため)
 
 ## ログインなしでの確認
