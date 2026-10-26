@@ -14,7 +14,7 @@
   p { margin: 3pt 0 5pt 0; text-align: justify; }
   ul, ol { margin: 2pt 0 5pt 0; padding-left: 18pt; }
   li { margin: 1pt 0; }
-  table { border-collapse: collapse; width: 100%; font-size: 9pt; margin: 4pt 0 6pt 0; }
+  table { border-collapse: collapse; width: calc(100% - 1.2pt); margin: 4pt 0.6pt 6pt 0.6pt; font-size: 9pt; }
   th, td { border: 0.6pt solid #888; padding: 2.5pt 5pt; vertical-align: top; }
   th { background: #eef1f5; font-weight: 600; text-align: left; }
   td.num, th.num { text-align: right; }
@@ -30,6 +30,10 @@
   table { page-break-inside: avoid; break-inside: avoid; }
   h2, h3 { break-after: avoid; page-break-after: avoid; }
   strong { font-weight: 600; }
+  sup.cite { font-size: 7pt; color: #555; vertical-align: super; line-height: 0; margin-left: 0.5pt; }
+  ol.refs { font-size: 8.2pt; line-height: 1.4; padding-left: 20pt; margin: 2pt 0; }
+  ol.refs li { margin: 0.8pt 0; text-align: left; overflow-wrap: anywhere; }
+
 </style>
 </head>
 <body>
@@ -39,7 +43,7 @@
 コード: <code>https://github.com/raycast-trail/go2-genesis-patrol</code> ／ 動画: <code>https://youtu.be/uhSM8Q9onhM</code>(YouTube「PAI最終課題_3164」、2 分 49 秒、一部 2 倍速)</div>
 
 <h2>1. 概要</h2>
-<p>四足歩行ロボット Unitree Go2 を物理シミュレータ Genesis 上で扱い、(1) 速度指令に追従する歩行方策を強化学習(PPO、4096 環境並列)で獲得し、(2) その上に、胴体に取り付けた疑似 LiDAR だけを手がかりに障害物を避けながら 2 m 角の正方形経路を巡回するナビゲーション層を載せた。ナビゲーション層の中心は、LiDAR で描いたマス目の地図(占有格子地図)の上で A*(エースター)探索により最短経路を引き直す<strong>地図による経路計画(v3)</strong>である。障害物をランダムに配置した <strong>45 配置</strong>で評価した結果、巡回成功率は回避なしの <strong>9% から 100%</strong> に、障害物への物理接触率は <strong>91% から 0%</strong> になった(同一配置での対応あり McNemar 正確検定 p &lt; 0.0001、転倒 0 件)。地図の効果を切り分けるため、地図を持たない反応的回避 2 種(v1・v2、成功率 91%・96%)と比べると、v3 は成功分の所要時間が中央値で 3.4 s・6.1 s 短く(符号検定 p &lt; 0.0001)、反応的回避の弱点(正面の障害物での振動、遠回り)をともに解消した。さらに、2D スキャンの水平面より低い箱(0.15 m)とテーブルの天板という「高さ方向で通行可否が変わる障害物」を混ぜた 30 配置では、2D LiDAR の成功率は <strong>3%</strong>(接触 97%)に落ち、点群を胴体の高さ帯で切って 2D 地図に投影する <strong>3D 疑似 LiDAR(72 × 16 層)で 100%・接触 0%</strong> に回復した(p &lt; 0.0001)。評価は物理接触を主指標とし、Wilson 信頼区間と対応あり検定、シミュレータの非決定性の切り分けを含めて設計した。実機 Go2 の「自己位置 → 地図・経路計画 → 速度指令 → 歩行コントローラ」と同じ層構造を再現しており、歩行(学習)とナビゲーション(決定的・説明可能)を疎結合に分けている点が特徴である。全工程は M1 Max の Mac 1 台(Metal / CPU)で完結し、GPU サーバやクラウドは使っていない。</p>
+<p>四足歩行ロボット Unitree Go2 を物理シミュレータ Genesis<sup class="cite">[1]</sup> 上で扱い、(1) 速度指令に追従する歩行方策を強化学習(PPO、4096 環境並列)で獲得し、(2) その上に、胴体に取り付けた疑似 LiDAR だけを手がかりに障害物を避けながら 2 m 角の正方形経路を巡回するナビゲーション層を載せた。ナビゲーション層の中心は、LiDAR で描いたマス目の地図(占有格子地図)の上で A*(エースター)探索により最短経路を引き直す<strong>地図による経路計画(v3)</strong>である。障害物をランダムに配置した <strong>45 配置</strong>で評価した結果、巡回成功率は回避なしの <strong>9% から 100%</strong> に、障害物への物理接触率は <strong>91% から 0%</strong> になった(同一配置での対応あり McNemar 正確検定 p &lt; 0.0001、転倒 0 件)。地図の効果を切り分けるため、地図を持たない反応的回避 2 種(v1・v2、成功率 91%・96%)と比べると、v3 は成功分の所要時間が中央値で 3.4 s・6.1 s 短く(符号検定 p &lt; 0.0001)、反応的回避の弱点(正面の障害物での振動、遠回り)をともに解消した。さらに、2D スキャンの水平面より低い箱(0.15 m)とテーブルの天板という「高さ方向で通行可否が変わる障害物」を混ぜた 30 配置では、2D LiDAR の成功率は <strong>3%</strong>(接触 97%)に落ち、点群を胴体の高さ帯で切って 2D 地図に投影する <strong>3D 疑似 LiDAR(72 × 16 層)で 100%・接触 0%</strong> に回復した(p &lt; 0.0001)。評価は物理接触を主指標とし、Wilson 信頼区間と対応あり検定、シミュレータの非決定性の切り分けを含めて設計した。実機 Go2 の「自己位置 → 地図・経路計画 → 速度指令 → 歩行コントローラ」と同じ層構造を再現しており、歩行(学習)とナビゲーション(決定的・説明可能)を疎結合に分けている点が特徴である。全工程は M1 Max の Mac 1 台(Metal / CPU)で完結し、GPU サーバやクラウドは使っていない。</p>
 
 <h2>2. 目的と背景</h2>
 <p>実機の自律巡回ロボットは「自己位置推定 → 経路計画 → 速度指令 → 歩行コントローラ」の層構造で作られ、下層ほどロボット固有、上層ほどタスク固有である。本課題では、このうち<strong>速度指令 → 歩行</strong>を強化学習で、<strong>センサ → 速度指令</strong>を古典的な制御(反応的回避、最終的には占有格子地図 + A*)で構成し、シミュレータ上で同じ構造を再現することを目的とした。狙いは次の 3 点である。</p>
@@ -54,10 +58,10 @@
 <figure><img src="figs/arch_crop.png" style="max-width:90%"><figcaption>図 1: システム構成(最終形 v3)。上から ① 地図・計画、② 速度指令、③ 歩行の層で、学習するのは ③ の歩行方策だけ。① は LiDAR で描いた地図の上で経路を引き(しくみは図 2)、② はその経路をたどる速度指令を作り、障害物が近すぎれば安全停止する。地図を持たない比較対象(v1・v2)との違いは §8 の図 9 を参照。</figcaption></figure>
 <table>
 <tr><th style="width:20%">層</th><th>実装</th><th style="width:30%">実機 Go2 との対応</th></tr>
-<tr><td>経路追従</td><td>4 つのウェイポイント(2 m 角)への P 制御。進行方向誤差 → ω<sub>z</sub>、距離 → v<sub>x</sub>。到達判定 0.3 m</td><td>Nav2 のローカル追従に相当</td></tr>
-<tr><td>地図による経路計画(v3)</td><td>地面除去後の LiDAR ヒット点から log-odds 占有格子(0.05 m、120×120)を逐次更新。占有セルを Go2 の半径 0.35 m で膨張し、8 近傍 A* で次のウェイポイントまでの経路を 1 s ごとに再計画。経路上 0.8 m 先をローカル目標として経路追従に渡す</td><td>Nav2 の costmap + global planner</td></tr>
-<tr><td>障害物回避(v1 / v2、v3 の下層)</td><td>進路幅 ±0.4 m の「回廊」内に入った LiDAR ヒットのみを正面障害物とみなし、1.0 m 未満で減速、0.45 m 未満で停止・その場旋回。旋回方向は最近接ヒットの反対側。ω<sub>z</sub> の変化率を ±0.1 rad/s/step に制限</td><td>反応的なローカル回避(DWA/VFH の簡易版)</td></tr>
-<tr><td>疑似 LiDAR(2D / 3D)</td><td>Genesis の Raycaster を胴体リンクに取付(高さ +0.15 m、床から 0.44 m)。2D: 360°/5° 刻み 72 本、最大 5 m、ヒット点の z &lt; 5 cm を床とみなして除去(地面除去)。3D: 72 方位 × 16 層(垂直 ±30°)の点群を「地面 / 胴体の高さ帯(0.05〜0.49 m)/ 頭上 / 自機」に分類し、胴体帯の点の最小水平距離を 72 本に投影(§9)。12 セクタの最小距離に集約</td><td>2D は 3D LiDAR の水平断面。3D の高さ帯投影は Nav2 の voxel layer と同じ処理</td></tr>
+<tr><td>経路追従</td><td>4 つのウェイポイント(2 m 角)への P 制御。進行方向誤差 → ω<sub>z</sub>、距離 → v<sub>x</sub>。到達判定 0.3 m</td><td>Nav2<sup class="cite">[11]</sup> のローカル追従に相当</td></tr>
+<tr><td>地図による経路計画(v3)</td><td>地面除去後の LiDAR ヒット点から log-odds 占有格子(0.05 m、120×120)を逐次更新。占有セルを Go2 の半径 0.35 m で膨張し、8 近傍 A* で次のウェイポイントまでの経路を 1 s ごとに再計画。経路上 0.8 m 先をローカル目標として経路追従に渡す</td><td>Nav2 の costmap<sup class="cite">[11, 12]</sup> + global planner</td></tr>
+<tr><td>障害物回避(v1 / v2、v3 の下層)</td><td>進路幅 ±0.4 m の「回廊」内に入った LiDAR ヒットのみを正面障害物とみなし、1.0 m 未満で減速、0.45 m 未満で停止・その場旋回。旋回方向は最近接ヒットの反対側。ω<sub>z</sub> の変化率を ±0.1 rad/s/step に制限</td><td>反応的なローカル回避(DWA<sup class="cite">[13]</sup> / VFH<sup class="cite">[14]</sup> の簡易版)</td></tr>
+<tr><td>疑似 LiDAR(2D / 3D)</td><td>Genesis の Raycaster を胴体リンクに取付(高さ +0.15 m、床から 0.44 m)。2D: 360°/5° 刻み 72 本、最大 5 m、ヒット点の z &lt; 5 cm を床とみなして除去(地面除去)。3D: 72 方位 × 16 層(垂直 ±30°)の点群を「地面 / 胴体の高さ帯(0.05〜0.49 m)/ 頭上 / 自機」に分類し、胴体帯の点の最小水平距離を 72 本に投影(§9)。12 セクタの最小距離に集約</td><td>2D は 3D LiDAR の水平断面。3D の高さ帯投影は Nav2 の voxel layer<sup class="cite">[12]</sup> と同じ処理</td></tr>
 <tr><td>歩行方策</td><td>PPO(rsl-rl)。観測 45 次元(胴体角速度・重力方向・速度指令・関節角/角速度・前回行動)、行動 12 次元(関節目標角の補正)、50 Hz、PD 制御(k<sub>p</sub>=20, k<sub>d</sub>=0.5)</td><td>Go2 の歩行コントローラ</td></tr>
 <tr><td>シミュレータ</td><td>Genesis 1.4.4(Apache-2.0)。学習は Metal バックエンド(4096 環境)、評価・録画は CPU バックエンド(1 環境)</td><td>—</td></tr>
 </table>
@@ -67,13 +71,13 @@
 <h3>v3 の地図と経路計画のしくみ</h3>
 <figure><img src="figs/astar_explain.png" style="max-width:100%"><figcaption>図 2: 占有格子地図と A* 探索のしくみ(説明用の模式図。小さなマス目で実際に計算して作成しており、マスの大きさ・レイの本数は実装と異なる)。</figcaption></figure>
 </div>
-<p>v3 は「歩きながら地図を描き、その地図の上で経路を引き直す」構成で、カーナビの経路探索と同じ考え方である(図 2)。① 床を小さなマス(実装では 5 cm 角)に区切り、LiDAR のレイが物に当たった点のマスを「占有」、レイが通り抜けたマスを「空き」とする。レイが届かないマス(箱の裏など)は「未知」のまま残る。実装では 1 回の観測で決めつけず、マスごとに確からしさ(log-odds)を足し引きし、何度も当たったマスだけを占有とする。これを<strong>占有格子地図</strong>と呼ぶ。② ロボットは点ではなく半径 0.35 m の大きさがあるので、占有マスをその半径だけ膨らませる(膨張)。こうすると「ロボットの中心が膨張領域に入らなければぶつからない」という、点の経路探索の問題に置き換えられる。③④ その地図の上で、スタートからゴールまでの最短経路を探す。ダイクストラ法はスタートから近い順に全方向へマスを調べるのに対し、<strong>A*(エースター)</strong>は「ここまでの距離 g + ゴールまでの直線距離 h」が小さいマスから調べるため、ゴールの方向へ優先して探索が進む。h が実際の残り距離を超えない限り、得られる経路は最短のまま保証される(図の例では調べたマスが 830 個から 341 個に減り、経路の長さは同じ)。未知のマスは通れるとみなして計画し、近づいて見えたら 1 秒ごとに経路を引き直す。Go2 は経路上 0.8 m 先の点を一時的な目標として追従し、反応的回避(v1)は不意の接近に備えた安全停止として下層に残す。</p>
+<p>v3 は「歩きながら地図を描き、その地図の上で経路を引き直す」構成で、カーナビの経路探索と同じ考え方である(図 2)。① 床を小さなマス(実装では 5 cm 角)に区切り、LiDAR のレイが物に当たった点のマスを「占有」、レイが通り抜けたマスを「空き」とする。レイが届かないマス(箱の裏など)は「未知」のまま残る。実装では 1 回の観測で決めつけず、マスごとに確からしさ(log-odds)を足し引きし、何度も当たったマスだけを占有とする。これを<strong>占有格子地図</strong><sup class="cite">[7, 8]</sup>と呼ぶ。② ロボットは点ではなく半径 0.35 m の大きさがあるので、占有マスをその半径だけ膨らませる(膨張)。こうすると「ロボットの中心が膨張領域に入らなければぶつからない」という、点の経路探索の問題に置き換えられる。③④ その地図の上で、スタートからゴールまでの最短経路を探す。ダイクストラ法<sup class="cite">[10]</sup>はスタートから近い順に全方向へマスを調べるのに対し、<strong>A*(エースター)</strong><sup class="cite">[9]</sup>は「ここまでの距離 g + ゴールまでの直線距離 h」が小さいマスから調べるため、ゴールの方向へ優先して探索が進む。h が実際の残り距離を超えない限り、得られる経路は最短のまま保証される(図の例では調べたマスが 830 個から 341 個に減り、経路の長さは同じ)。未知のマスは通れるとみなして計画し、近づいて見えたら 1 秒ごとに経路を引き直す。Go2 は経路上 0.8 m 先の点を一時的な目標として追従し、反応的回避(v1)は不意の接近に備えた安全停止として下層に残す。</p>
 
 <h2>4. 歩行方策の学習(強化学習)</h2>
-<p>本システムで AI(ニューラルネットワークの学習と推論)を使っているのはこの層である。四足歩行では 12 個の関節を、接地とバランスを保ちながら協調して動かす必要があり、その動かし方を規則として手で書くのは難しい。そこで、シミュレータの中でロボットに試行錯誤させて歩き方を身につけさせる<strong>強化学習</strong>を用いた。強化学習では、状態を見て行動を選ぶ関数(<strong>方策</strong>)が実際に行動し、その結果に応じて<strong>報酬</strong>を受け取る。方策は、将来にわたって受け取る報酬の合計が大きくなるように少しずつ修正される。正解の動きを教える必要はなく、「何が良い結果か」を報酬で伝えるだけでよい(図 3)。</p>
+<p>本システムで AI(ニューラルネットワークの学習と推論)を使っているのはこの層である。四足歩行では 12 個の関節を、接地とバランスを保ちながら協調して動かす必要があり、その動かし方を規則として手で書くのは難しい。そこで、シミュレータの中でロボットに試行錯誤させて歩き方を身につけさせる<strong>強化学習</strong>を用いた<sup class="cite">[2]</sup>。強化学習では、状態を見て行動を選ぶ関数(<strong>方策</strong>)が実際に行動し、その結果に応じて<strong>報酬</strong>を受け取る。方策は、将来にわたって受け取る報酬の合計が大きくなるように少しずつ修正される。正解の動きを教える必要はなく、「何が良い結果か」を報酬で伝えるだけでよい(図 3)。</p>
 <figure><img src="figs/rl_explain.png" style="max-width:100%"><figcaption>図 3: 強化学習による歩行方策のしくみ。(a) 学習: 4096 体の Go2 を同時にシミュレーションし、集めた経験から PPO で方策を少しずつ更新する。(b) 推論: 巡回中は学習済みのネットワークに 20 ms ごとに観測を入れ、12 関節の目標角を得る。ナビゲーション層が書き換えるのは入力のうち速度指令の 3 個だけ。</figcaption></figure>
 <h3>入力と出力</h3>
-<p>方策は全結合 3 層(512・256・128 ユニット、活性化関数 ELU、約 19 万パラメータ)の小さなネットワークである。入力は 45 個の数値で、胴体の角速度(3)、重力の向き = 胴体の傾き(3)、<strong>速度指令 v<sub>x</sub>, v<sub>y</sub>, ω<sub>z</sub>(3)</strong>、関節角の標準姿勢からの差(12)、関節の角速度(12)、前回の行動(12)からなる。胴体の速度そのものは入力に含まれず、方策は関節の動きと傾きから自分の歩き方を推し量って指令に合わせる。出力は 12 関節の目標角の補正量で、0.25 倍して標準姿勢に足した角度を PD 制御(k<sub>p</sub> = 20、k<sub>d</sub> = 0.5)で追わせ、関節トルクにする。実機の制御遅れを模して、行動は 1 ステップ遅れて反映される。<strong>速度指令が入力の一部になっていることが、ナビゲーション層と歩行層の境目</strong>である。ナビゲーション層はこの 3 個を書き換えるだけで、歩行方策の中身には触れない。</p>
+<p>方策は全結合 3 層(512・256・128 ユニット、活性化関数 ELU<sup class="cite">[5]</sup>、約 19 万パラメータ)の小さなネットワークである。入力は 45 個の数値で、胴体の角速度(3)、重力の向き = 胴体の傾き(3)、<strong>速度指令 v<sub>x</sub>, v<sub>y</sub>, ω<sub>z</sub>(3)</strong>、関節角の標準姿勢からの差(12)、関節の角速度(12)、前回の行動(12)からなる。胴体の速度そのものは入力に含まれず、方策は関節の動きと傾きから自分の歩き方を推し量って指令に合わせる。出力は 12 関節の目標角の補正量で、0.25 倍して標準姿勢に足した角度を PD 制御(k<sub>p</sub> = 20、k<sub>d</sub> = 0.5)で追わせ、関節トルクにする。実機の制御遅れを模して、行動は 1 ステップ遅れて反映される。<strong>速度指令が入力の一部になっていることが、ナビゲーション層と歩行層の境目</strong>である。ナビゲーション層はこの 3 個を書き換えるだけで、歩行方策の中身には触れない。</p>
 <h3>報酬の設計</h3>
 <table>
 <tr><th>報酬の項目</th><th>何を評価するか</th><th class="num">重み</th></tr>
@@ -86,10 +90,10 @@
 </table>
 <p class="small">各項にシミュレーションの刻み幅 0.02 s を掛けて毎ステップ合計する。前後・左右に 10° を超えて傾いたら転倒とみなしてその 1 体だけ最初からやり直し、1 回の試行は最長 20 s。速度指令は 4 s ごとに範囲内でランダムに選び直すので、方策は指令が途中で変わる状況にも慣れる。</p>
 <h3>PPO と並列学習</h3>
-<p>方策の更新には <strong>PPO</strong>(Proximal Policy Optimization)を用いた。方策と同じ形のもう 1 つのネットワーク(<strong>価値ネットワーク</strong>)が「この状態からなら、今後どれだけ報酬が得られそうか」を見積もり、実際に得た報酬がその見積もりより良かった行動を増やし、悪かった行動を減らす向きに方策を直す(割引率 γ = 0.99、GAE の λ = 0.95)。PPO の特徴は、1 回の更新で方策が変わりすぎないよう変化の幅を制限すること(クリップ幅 0.2、学習率 0.001 を方策の変化量に応じて自動調整)で、これにより学習が安定する。学習中は行動にランダムなばらつきを加えていろいろな動きを試させ(探索)、巡回時はばらつきを外した出力を使う。</p>
+<p>方策の更新には <strong>PPO</strong>(Proximal Policy Optimization)<sup class="cite">[3]</sup>を用いた。方策と同じ形のもう 1 つのネットワーク(<strong>価値ネットワーク</strong>)が「この状態からなら、今後どれだけ報酬が得られそうか」を見積もり、実際に得た報酬がその見積もりより良かった行動を増やし、悪かった行動を減らす向きに方策を直す(割引率 γ = 0.99、GAE<sup class="cite">[4]</sup> の λ = 0.95)。PPO の特徴は、1 回の更新で方策が変わりすぎないよう変化の幅を制限すること(クリップ幅 0.2、学習率 0.001 を方策の変化量に応じて自動調整)で、これにより学習が安定する。学習中は行動にランダムなばらつきを加えていろいろな動きを試させ(探索)、巡回時はばらつきを外した出力を使う。</p>
 <p>強化学習は大量の試行を必要とするが、Genesis では 4096 体の Go2 を GPU(Apple Silicon の Metal)上で同時に動かせる。1 回の更新では 4096 体 × 24 ステップ = 約 9.8 万組の経験を集め、それを 4 分割して 5 周学習する。これを <strong>300 回</strong>繰り返した(M1 Max で約 9 分、7.4〜7.8 万 steps/s)。合計約 2,950 万ステップで、1 体のロボットなら約 164 時間かかる量の経験を 9 分で得たことになる。</p>
 <h3>指令範囲の拡張と結果</h3>
-<p>出発点は Genesis 付属の Go2 歩行例題(Legged Gym 由来の上記の報酬)である。ただし既定の例題は速度指令が <strong>前進 0.5 m/s に固定</strong>されており、「前進しかできない方策」しか得られない。巡回には減速・停止・旋回が必要なので、指令の範囲を v<sub>x</sub> ∈ [0, 0.8] m/s、v<sub>y</sub> ∈ [−0.2, 0.2] m/s、ω<sub>z</sub> ∈ [−0.8, 0.8] rad/s に広げて学習し直した。</p>
+<p>出発点は Genesis 付属の Go2 歩行例題(Legged Gym<sup class="cite">[2]</sup> 由来の上記の報酬)である。ただし既定の例題は速度指令が <strong>前進 0.5 m/s に固定</strong>されており、「前進しかできない方策」しか得られない。巡回には減速・停止・旋回が必要なので、指令の範囲を v<sub>x</sub> ∈ [0, 0.8] m/s、v<sub>y</sub> ∈ [−0.2, 0.2] m/s、ω<sub>z</sub> ∈ [−0.8, 0.8] rad/s に広げて学習し直した。</p>
 <div class="row">
 <figure style="flex:1.15"><img src="figs/train_curve_crop.png"><figcaption>図 4: 学習曲線。速度追従報酬 0.97/1.0、旋回追従 0.186/0.2、エピソード長 991/1000(転倒ほぼゼロ)。</figcaption></figure>
 <figure style="flex:1"><img src="figs/traj_compare.png" style="max-width:100%"><figcaption>図 5: 正方形巡回(障害物なし)。拡張方策(青)は 4 隅を 15.9 s で回る。既定方策(橙)は旋回指令を無視して直進し 1/4 で時間切れ。</figcaption></figure>
@@ -100,17 +104,17 @@
 <p>Raycaster を既知配置(正面 1.3 m に箱、右 1.85 m に円柱)で単体検証し、距離が幾何計算の期待値と 2 mm 以内で一致すること、Metal と CPU で値が完全一致することを確認した。重要だった落とし穴が 2 つある。(1) 胴体が前傾すると水平レイが床に当たり、2〜5 m 先に偽の障害物が見える。ヒット点の高さで床を除去する処理を入れ、障害物なしの巡回 802 ステップで除去後の偽ヒットが 0 本になることを確認した。(2) 初期姿勢(落下前)はセンサが高さ 0.5 m の箱を越えて見えないため、障害物の高さは 0.6 m 以上とし、着地後からスキャンを使う。</p>
 <p>回避則は当初「正面 ±45° と左右セクタの空き具合で旋回方向を決める」設計だったが、3 配置の試験で 2 配置が未到達となった。ログを調べると、「正面右の障害物に対して、左の遠くに別の障害物があるという理由で右(障害物側)へ旋回する」欠陥があった。そこで正面判定を <strong>進路幅 ±0.4 m の回廊</strong>に、旋回方向を <strong>最近接ヒットの反対側</strong>に変更した(v1)。これにより 3 配置すべてで 4/4 到達・接触 0 となった。</p>
 <div class="row">
-<figure><img src="figs/traj_t03_seed0.png" style="max-width:72%"><figcaption>図 6: 障害物あり配置(seed 0)。回避あり(青)は経路脇の円柱を内側に避ける。回避なし(橙)は同じ円柱に 25 秒押し付けられる(赤点)。</figcaption></figure>
+<figure style="flex:0.75"><img src="figs/traj_t03_seed0_crop.png" style="max-width:100%"><figcaption>図 6: 障害物あり配置(seed 0)。回避あり(青)は経路脇の円柱を内側に避ける。回避なし(橙)は同じ円柱に 25 秒押し付けられる(赤点)。</figcaption></figure>
 <figure><img src="figs/foxglove_crop.png"><figcaption>図 7: 巡回ログ(MCAP)を Foxglove で可視化。地面除去後の LiDAR 点群(z で色付け)が 5 つの障害物の側面をなぞり、青い軌跡がその間を通る。下段は v<sub>x</sub>・ω<sub>z</sub>・正面距離の時系列。</figcaption></figure>
 </div>
-<p>巡回中の全データ(TF、スキャン、点群、軌跡、障害物、指令)は Foxglove SDK で MCAP に書き出せるようにした(ROS 不要)。図 7 は実機の LiDAR 運用と同じ可視化経路で、点群が障害物の輪郭を描き、正面距離が下がると v<sub>x</sub> が落ちて ω<sub>z</sub> が立つ因果が時系列で読める。</p>
+<p>巡回中の全データ(TF、スキャン、点群、軌跡、障害物、指令)は Foxglove SDK で MCAP<sup class="cite">[18]</sup> に書き出せるようにした(ROS 不要)。図 7 は実機の LiDAR 運用と同じ可視化経路で、点群が障害物の輪郭を描き、正面距離が下がると v<sub>x</sub> が落ちて ω<sub>z</sub> が立つ因果が時系列で読める。</p>
 
 <h2>6. 評価設計</h2>
 <ul>
   <li><strong>シーン</strong>: 2 m 角の正方形経路の周囲 3 m 角に、箱(0.3〜0.5 m 角)と円柱(半径 0.1〜0.2 m)を 3〜6 個乱数配置(seed で再現可能)。ウェイポイントから 0.5 m、初期位置から 1.0 m、障害物同士 1.2 m のクリアランスを棄却サンプリングで確保。</li>
   <li><strong>指標</strong>: 成功 = 60 秒以内に 4 ウェイポイント到達 かつ 転倒なし かつ <strong>物理接触なし</strong>。接触率、ニアミス率(LiDAR 最小距離 &lt; 0.25 m)、成功分の所要時間、経路効率(直線距離 8.0 m / 走行距離)。</li>
   <li><strong>衝突判定の変更</strong>: 設計当初は LiDAR 最小距離 &lt; 0.25 m を衝突としていたが、正面から押し付けている状態では胴体前端が当たっていてもセンサ中心から 0.3 m 以上あり検出できないことが分かった(横擦りは検出できる)。そこで物理接触を主指標、LiDAR 判定を副指標に改めた。</li>
-  <li><strong>比較</strong>: 同一 seed に対して条件を変える対応あり比較。McNemar 正確検定(成功・接触)、Wilson 95% 信頼区間、所要時間は符号検定・Wilcoxon 符号順位検定(数式を自前実装)。</li>
+  <li><strong>比較</strong>: 同一 seed に対して条件を変える対応あり比較。McNemar 正確検定<sup class="cite">[15]</sup>(成功・接触)、Wilson 95% 信頼区間<sup class="cite">[16]</sup>、所要時間は符号検定・Wilcoxon 符号順位検定<sup class="cite">[17]</sup>(数式を自前実装)。</li>
   <li><strong>非決定性</strong>: 同一条件でも結果が揺れること(例: ある配置で到達数が 1/4〜4/4)を確認したため、録画の有無・MCAP 出力の有無・プロセスの別など 5 条件 × 3 回で切り分けた。条件間に系統差はなく、CPU バックエンドの真の非決定性と判断した。評価は配置数で平均化する設計のため結論には影響しないが、「1 配置の 1 回の結果」は信用しない。</li>
 </ul>
 
@@ -159,7 +163,7 @@
 <h2>9. 3D LiDAR: 高さ方向で通行可否が変わる障害物</h2>
 <p>ここまでの障害物はすべて高さ 0.6 m 以上で、センサ面(床から 0.44 m)の 2D スキャンに必ず映る。実環境で問題になるのは、床に置かれた低い物や机の天板のように<strong>スキャン面に映らないが胴体には当たる</strong>障害物である。立位と歩行中の実測(胴体最高点 0.35 m、歩行中 0.39 m、遊脚の最大高さ 0.02 m)から、<strong>低い箱</strong>(高さ 0.15 m、スキャン面の 29 cm 下、遊脚より上なので踏むと転倒しうる)と<strong>テーブル</strong>(天板 0.32〜0.36 m、スキャン面より下で胴体より低い。脚は半径 2 cm の円柱 4 本)を設計した。2D スキャンでは低い箱は見えず、テーブルは細い脚しか見えないため「通れる」と判断される。</p>
 <p>3D 化はナビゲーション層を変えずに入力だけを差し替える形にした。Raycaster を 72 方位 × 16 層(垂直 ±30°、4° 刻み)にして点群を得、ヒット点の高さで「地面(&lt; 0.05 m)/ 胴体の高さ帯(0.05〜0.49 m)/ 頭上 / 自機(下向きのレイが自分の脚に当たる点。胴体フレームの矩形で除外)」に分類し、胴体帯の点の最小水平距離を方位ごとに 72 本の仮想スキャンへ投影して、v1 の下層と v3 の地図にそのまま渡す。追加コストは +0.5〜0.8 ms/step で、評価・録画の速度にほぼ影響しない。</p>
-<figure><img src="figs/lidar3d_test_crop.png" style="max-width:100%"><figcaption>図 11: 既知配置(正面 1.3 m に低い箱、右に縁 1.5 m のテーブル、左 1.5 m に高い箱)での単体テスト。左: 2D スキャンには高い箱しか映らない。中: 3D の高さ帯投影では 3 つとも映る。右: 点群の高さ分類(灰 = 地面、橙 = 胴体帯、青 = 頭上、緑 = 自機)。</figcaption></figure>
+<figure><img src="figs/lidar3d_test.png" style="max-width:90%"><figcaption>図 11: 既知配置(正面 1.3 m に低い箱、右に縁 1.5 m のテーブル、左 1.5 m に高い箱)での単体テスト。左: 2D スキャンには高い箱しか映らない。中: 3D の高さ帯投影では 3 つとも映る。右: 点群の高さ分類(灰 = 地面、橙 = 胴体帯、青 = 頭上、緑 = 自機)。</figcaption></figure>
 <p>低い箱 1〜2 個・テーブル 1 台・高い障害物 1〜2 個を乱数配置し、少なくとも 1 つの低い障害物が経路上に来る <strong>30 配置</strong>(seed 100–129)で、v3 の入力だけを変えて比較した。</p>
 <table>
 <tr><th>v3 の入力</th><th class="num">成功率 [95% CI]</th><th class="num">接触率</th><th class="num">転倒</th><th class="num">所要 [s]</th><th>失敗の内訳</th></tr>
@@ -201,7 +205,29 @@
 
 <h2>12. 再現と使用 OSS</h2>
 <p class="small">環境: macOS(Apple Silicon)、Python 3.11、genesis-world 1.4.4、rsl-rl-lib 5.5、torch 2.14、foxglove-sdk 0.30。<code>pip install -r requirements.txt</code> の後、<code>python go2_train_patrol.py -e go2-patrol -b 4096 --max-iterations 300</code>(学習)、<code>python go2_patrol.py -e go2-patrol --ckpt 299 --seed 10 --avoid --avoid-version v3 --backend cpu --out out.mp4 --mcap out.mcap</code>(巡回・録画。<code>--avoid-version v1|v2|v3</code>、<code>--lidar 2d|3d</code>。3D の混合配置は seed 100〜129)、<code>python eval/run_eval.py ... && python eval/summarize.py</code>(評価)。詳細はリポジトリの README と <code>reports/01〜13</code>。
-使用 OSS: Genesis(Apache-2.0、Go2 例題 <code>go2_env.py</code> / <code>go2_train.py</code> を改変・複製し NOTICE に明記)、rsl_rl(BSD-3)、PyTorch、Foxglove SDK(MIT)。本リポジトリは Apache-2.0。</p>
+使用 OSS: Genesis(Apache-2.0、Go2 例題 <code>go2_env.py</code> / <code>go2_train.py</code> を改変・複製し NOTICE に明記)、rsl_rl<sup class="cite">[6]</sup>(BSD-3)、PyTorch、Foxglove SDK(MIT)。本リポジトリは Apache-2.0。</p>
+
+<h2 class="pb">13. 参考文献</h2>
+<ol class="refs">
+<li>Genesis Authors. Genesis: A Generative and Universal Physics Engine for Robotics and Beyond. December 2024. https://github.com/Genesis-Embodied-AI/genesis-world</li>
+<li>N. Rudin, D. Hoeller, P. Reist, M. Hutter. Learning to Walk in Minutes Using Massively Parallel Deep Reinforcement Learning. Proceedings of the 5th Conference on Robot Learning (CoRL 2021), PMLR 164:91–100, 2022 (arXiv:2109.11978).</li>
+<li>J. Schulman, F. Wolski, P. Dhariwal, A. Radford, O. Klimov. Proximal Policy Optimization Algorithms. arXiv:1707.06347, 2017.</li>
+<li>J. Schulman, P. Moritz, S. Levine, M. Jordan, P. Abbeel. High-Dimensional Continuous Control Using Generalized Advantage Estimation. ICLR, 2016 (arXiv:1506.02438).</li>
+<li>D.-A. Clevert, T. Unterthiner, S. Hochreiter. Fast and Accurate Deep Network Learning by Exponential Linear Units (ELUs). ICLR, 2016 (arXiv:1511.07289).</li>
+<li>C. Schwarke, M. Mittal, N. Rudin, D. Hoeller, M. Hutter. RSL-RL: A Learning Library for Robotics Research. arXiv:2509.10771, 2025. https://github.com/leggedrobotics/rsl_rl</li>
+<li>A. Elfes. Using Occupancy Grids for Mobile Robot Perception and Navigation. Computer, 22(6):46–57, 1989.</li>
+<li>S. Thrun, W. Burgard, D. Fox. Probabilistic Robotics. MIT Press, 2005.</li>
+<li>P. E. Hart, N. J. Nilsson, B. Raphael. A Formal Basis for the Heuristic Determination of Minimum Cost Paths. IEEE Transactions on Systems Science and Cybernetics, 4(2):100–107, 1968. doi:10.1109/TSSC.1968.300136</li>
+<li>E. W. Dijkstra. A Note on Two Problems in Connexion with Graphs. Numerische Mathematik, 1:269–271, 1959. doi:10.1007/BF01386390</li>
+<li>S. Macenski, F. Martín, R. White, J. Ginés Clavero. The Marathon 2: A Navigation System. IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS), 2020. doi:10.1109/IROS45743.2020.9341207 (arXiv:2003.00368)</li>
+<li>D. V. Lu, D. Hershberger, W. D. Smart. Layered Costmaps for Context-Sensitive Navigation. IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS), pp. 709–715, 2014. doi:10.1109/IROS.2014.6942636</li>
+<li>D. Fox, W. Burgard, S. Thrun. The Dynamic Window Approach to Collision Avoidance. IEEE Robotics &amp; Automation Magazine, 4(1):23–33, 1997.</li>
+<li>J. Borenstein, Y. Koren. The Vector Field Histogram — Fast Obstacle Avoidance for Mobile Robots. IEEE Transactions on Robotics and Automation, 7(3):278–288, 1991.</li>
+<li>Q. McNemar. Note on the Sampling Error of the Difference between Correlated Proportions or Percentages. Psychometrika, 12(2):153–157, 1947. doi:10.1007/BF02295996</li>
+<li>E. B. Wilson. Probable Inference, the Law of Succession, and Statistical Inference. Journal of the American Statistical Association, 22(158):209–212, 1927. doi:10.1080/01621459.1927.10502953</li>
+<li>F. Wilcoxon. Individual Comparisons by Ranking Methods. Biometrics Bulletin, 1:80–83, 1945.</li>
+<li>Foxglove. MCAP (https://mcap.dev) and Foxglove SDK (https://github.com/foxglove/foxglove-sdk).</li>
+</ol>
 
 </body>
 </html>

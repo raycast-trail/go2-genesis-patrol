@@ -141,5 +141,5 @@ axs[1, 1].text(39.4, 22.6, "優先度 = ここまでの距離 g\n      + ゴー�
 axs[1, 1].annotate("箱の裏は未知 → 通れるとみなして計画。\n近づいて見えたら 1 秒ごとに引き直す", xy=(25.5, 10.5), xytext=(13.0, 2.4),
     fontsize=9, ha="left", arrowprops=dict(arrowstyle="->", color="#555"), zorder=8,
     bbox=dict(fc="white", ec="#aaa", pad=2))
-fig.tight_layout(h_pad=1.2, w_pad=1.0)
+fig.tight_layout(h_pad=3.2, w_pad=1.5)
 fig.savefig("/home/claude/figwork/astar_explain.png", dpi=150, facecolor="white")

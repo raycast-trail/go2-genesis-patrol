@@ -99,14 +99,14 @@ def main():
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     th = np.deg2rad(ANGLES_DEG)
-    fig = plt.figure(figsize=(15, 5))
+    fig = plt.figure(figsize=(15, 5.6))
     for i, (sc, title) in enumerate([(scan2, "2D scan (horizontal, z = sensor)"), (scan3, "3D -> body-band projection (72 az)")]):
         ax = fig.add_subplot(1, 3, i + 1, projection="polar")
         title = title.replace("72 az", f"{len(el)} layers")
         ax.set_theta_zero_location("N")
         ax.plot(th, np.minimum(sc, mr), "o", ms=3, color="tab:blue" if i == 0 else "tab:orange")
         ax.set_rmax(3.0)
-        ax.set_title(title, fontsize=10)
+        ax.set_title(title, fontsize=10, pad=18)   # 目盛り 0° と重ならないように
     ax = fig.add_subplot(1, 3, 3, projection="3d")
     m = hit & (np.hypot(pts_all[:, 0] - base3[0], pts_all[:, 1] - base3[1]) < 3.0)
     colors = {CLS_GROUND: ("#bbbbbb", "ground z<0.05"), CLS_BODY: ("#eb6834", "body band 0.05..0.49"), CLS_OVERHEAD: ("#2a78d6", "overhead >0.49"), CLS_SELF: ("#1baf7a", "self (footprint)")}
@@ -122,7 +122,7 @@ def main():
     fig.suptitle(f"{args.mode} ({len(el)} layers): low box front (1.3 m, h 0.15), table right (edge 1.5 m, top 0.32-0.36 m), tall box left (1.5 m)", fontsize=11)
     fig.tight_layout()
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
-    fig.savefig(args.out, dpi=130)
+    fig.savefig(args.out, dpi=130, bbox_inches="tight", pad_inches=0.25)   # 下端の 180° が切れないように
     print("[lidar3d] wrote", args.out)
 
 
